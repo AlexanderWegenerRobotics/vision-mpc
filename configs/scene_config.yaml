@@ -1,0 +1,46 @@
+world_model: assets/mujoco/scenes/world_scene.xml
+use_viewer: False
+
+render_cameras:
+  - name: eye_in_hand
+    attachment: arm
+    enabled: True
+    width: 640
+    height: 480
+  
+  - name: workspace_overview
+    attachment: False
+    enabled: True
+    width: 640
+    height: 480
+
+display:
+  layout: grid  # Options: horizontal, vertical, grid
+  grid_cols: 2
+  window_name: "Robot Camera Views"
+
+devices:
+  - name: arm
+    type: robot
+    enabled: True
+    model_path: assets/mujoco/robots/panda/panda_torque_eye_in_hand.xml
+    base_pose:
+      position: [0, 0, 0.425]
+      orientation: [0, 0, 0, 1]
+    q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398, 0.04, 0.04]
+
+objects:
+  - name: table
+    type: static
+    model_path: assets/mujoco/props/table.xml
+    pose:
+      position: [0.0, 0, 0]
+      orientation: [1, 0, 0, 0]
+
+
+cameras:
+  - name: workspace_overview
+    type: fixed
+    pos: [0.5, 0.5, 1.2]
+    quat: [0.924, -0.383, 0, 0]
+    fovy: 60

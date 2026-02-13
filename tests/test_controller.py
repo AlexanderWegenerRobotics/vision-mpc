@@ -3,6 +3,7 @@ from pathlib import Path
 sys.path.insert(1, str(Path(__file__).parent.parent))
 import numpy as np
 import time
+import threading
 from src.env.sim_model import SimulationModel
 from src.common.robot_kinematics import RobotKinematics
 from src.controller.controller_manager import ControllerManager
@@ -15,7 +16,7 @@ def test_position_control(logger=None):
     config = load_yaml("configs/global_config.yaml")
     controller_config = load_yaml(config['controller_config'])
     
-    sim = SimulationModel(config)
+    sim = SimulationModel(config, logger=logger)
     robot_kin = RobotKinematics(config['pin_model'])
     controller = ControllerManager(controller_config, robot_kin, logger=logger)
     
@@ -27,31 +28,33 @@ def test_position_control(logger=None):
     print(f"Mode: {controller.get_current_mode()}")
     print(f"Moving to home position...")
     
-    def control_loop():
-        for i in range(4000):
-            state = sim.get_state()
-            
-            if i < 4000:
-                target = {'q': q_home}
-            else:
-                target = {'q': q_test}
-            
-            tau = controller.compute_control(state, target)
-            sim.set_control(tau)
-            
-            if i % 50 == 0:
-                q_current = state['q']
-                error = np.linalg.norm(target['q'] - q_current)
-                print(f"Step {i}, Error: {error:.4f}")
-            
-            time.sleep(0.005)
+    step_counter = [0]
     
-    control_thread = threading.Thread(target=control_loop, daemon=True)
-    control_thread.start()
+    def control_callback(state):
+        step_counter[0] += 1
+        
+        if step_counter[0] < 4000:
+            target = {'q': q_home}
+        else:
+            target = {'q': q_test}
+        
+        tau = controller.compute_control(state, target)
+        
+        if step_counter[0] % 50 == 0:
+            q_current = state['q']
+            error = np.linalg.norm(target['q'] - q_current)
+            print(f"Step {step_counter[0]}, Error: {error:.4f}")
+        
+        return tau
     
-    sim.start()
-    control_thread.join()
-    sim.stop()
+    sim.set_control_callback(control_callback)
+    
+    try:
+        sim.start()
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        sim.stop()
 
 def test_impedance_control(logger=None):
     print("\n=== Testing Impedance Control ===")
@@ -59,7 +62,7 @@ def test_impedance_control(logger=None):
     config = load_yaml("configs/scene_config.yaml")
     controller_config = load_yaml(config['controller_config'])
     
-    sim = SimulationModel(config)
+    sim = SimulationModel(config, logger=logger)
     robot_kin = RobotKinematics(config['pin_model'])
     controller = ControllerManager(controller_config['controller'], robot_kin, logger=logger)
     
@@ -70,31 +73,32 @@ def test_impedance_control(logger=None):
     print(f"Mode: {controller.get_current_mode()}")
     print(f"Moving to hover position...")
     
-    def control_loop():
-        for i in range(500):
-            state = sim.get_state()
-            
-            target = {'x': x_hover}
-            
-            tau = controller.compute_control(state, target)
-            sim.set_control(tau)
-            
-            if i % 50 == 0:
-                x_current = robot_kin.forward_kinematics(state['q'])
-                error = np.linalg.norm(x_hover - x_current)
-                print(f"Step {i}, Task Error: {error:.4f}")
-            
-            time.sleep(0.002)
+    step_counter = [0]
     
-    control_thread = threading.Thread(target=control_loop, daemon=True)
-    control_thread.start()
+    def control_callback(state):
+        step_counter[0] += 1
+        
+        target = {'x': x_hover}
+        
+        tau = controller.compute_control(state, target)
+        
+        if step_counter[0] % 50 == 0:
+            x_current = robot_kin.forward_kinematics(state['q'])
+            error = np.linalg.norm(x_hover - x_current)
+            print(f"Step {step_counter[0]}, Task Error: {error:.4f}")
+        
+        return tau
     
-    sim.start()
-    control_thread.join()
-    sim.stop()
+    sim.set_control_callback(control_callback)
+    
+    try:
+        sim.start()
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        sim.stop()
 
 if __name__ == "__main__":
-    import threading
     logger = DataLogger(trial_name='test_controller', output_dir='log/')
 
     try:
