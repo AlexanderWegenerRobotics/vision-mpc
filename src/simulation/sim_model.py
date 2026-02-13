@@ -152,35 +152,35 @@ class SimulationModel:
         
         # Extract IDs from compiled model
         all_entities = {**devices, **objects}
-        self._extract_device_ids(model=compiled_model, devices=devices)
+        self._extract_device_ids(model=compiled_model, entities=all_entities)
 
         return compiled_model, devices, objects
     
-    def _extract_device_ids(self, model: mj.MjModel, devices: Dict[str, DeviceInfo]):
-        for device_info in devices.values():
-            prefix = device_info.prefix
+    def _extract_device_ids(self, model: mj.MjModel, entities: Dict[str, DeviceInfo]):
+        for entity_info in entities.values():
+            prefix = entity_info.prefix
             # Find joints
             for joint_id in range(model.njnt):
                 joint_name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_JOINT, joint_id)
                 if joint_name and joint_name.startswith(prefix):
-                    device_info.joint_ids.append(joint_id)
-                    device_info.joint_names.append(joint_name)
+                    entity_info.joint_ids.append(joint_id)
+                    entity_info.joint_names.append(joint_name)
                     dof_adr = model.jnt_dofadr[joint_id]
-                    device_info.dof_ids.append(dof_adr)
+                    entity_info.dof_ids.append(dof_adr)
 
             # Find actuators
             for act_id in range(model.nu):
                 act_name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, act_id)
                 if act_name and act_name.startswith(prefix):
-                    device_info.actuator_ids.append(act_id)
-                    device_info.actuator_names.append(act_name)
+                    entity_info.actuator_ids.append(act_id)
+                    entity_info.actuator_names.append(act_name)
             
             # Find bodies
             for body_id in range(model.nbody):
                 body_name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, body_id)
                 if body_name and body_name.startswith(prefix):
-                    device_info.body_ids.append(body_id)
-                    device_info.body_names.append(body_name)
+                    entity_info.body_ids.append(body_id)
+                    entity_info.body_names.append(body_name)
 
     def _setup_cameras(self):
         """Setup camera renderers based on config and available cameras in model."""
@@ -276,29 +276,45 @@ class SimulationModel:
             last_time = time.time()
 
     def _log_step(self):
-        """Log current simulation state based on configuration."""
+        """Log current simulation state."""
         if self.logger is None:
             return
-            
-        bundles_to_log = self.log_config.get('bundles', [])
         
-        for bundle_cfg in bundles_to_log:
-            bundle_name = bundle_cfg.get('name')
-            bundle_type = bundle_cfg.get('type')
-
-            if bundle_type == 'robot_state':
-                device_name = bundle_cfg.get('device', 'arm')
-                state = self.get_state(device_name)
-                
-                self.logger.log_bundle(bundle_name, 
-                                       {
-                    'q': state.q,
-                    'qd': state.qd,
-                    'qdd': state.qdd,
-                    'tau': state.tau,
-                    'command': self._command[self.devices[device_name].actuator_ids].copy()
-                })
-
+        with self._lock:
+            # Log all devices (robots, sensors)
+            for device_name, device_info in self.devices.items():
+                if len(device_info.dof_ids) > 0:
+                    state_data = {
+                        'q': self.mj_data.qpos[device_info.dof_ids].copy(),
+                        'qd': self.mj_data.qvel[device_info.dof_ids].copy(),
+                        'qdd': self.mj_data.qacc[device_info.dof_ids].copy(),
+                        'tau': self.mj_data.actuator_force[device_info.actuator_ids].copy(),
+                        'ctrl': self._command[device_info.actuator_ids].copy()
+                    }
+                    
+                    # Add base pose if device has bodies
+                    if len(device_info.body_ids) > 0:
+                        base_body_id = device_info.body_ids[0]
+                        state_data['base_pos'] = self.mj_data.xpos[base_body_id].copy()
+                        state_data['base_quat'] = self.mj_data.xquat[base_body_id].copy()
+                    
+                    self.logger.log_bundle(device_name, state_data)
+            
+            # Log all objects (static/dynamic props)
+            for object_name, object_info in self.objects.items():
+                if len(object_info.body_ids) > 0:
+                    object_data = {
+                        'pos': self.mj_data.xpos[object_info.body_ids[0]].copy(),
+                        'quat': self.mj_data.xquat[object_info.body_ids[0]].copy()
+                    }
+                    
+                    # If object has joints, log those too
+                    if len(object_info.dof_ids) > 0:
+                        object_data['q'] = self.mj_data.qpos[object_info.dof_ids].copy()
+                        object_data['qd'] = self.mj_data.qvel[object_info.dof_ids].copy()
+                        object_data['qdd'] = self.mj_data.qacc[object_info.dof_ids].copy()
+                    
+                    self.logger.log_bundle(object_name, object_data)
         
 if __name__ == "__main__":
     from src.simulation.sim_display import SimulationDisplay

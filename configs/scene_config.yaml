@@ -22,11 +22,7 @@ display:
 # Logging configuration
 logging:
   enabled: True
-  frequency: 30
-  bundles:
-    - name: robot_state
-      type: robot_state
-      device: arm
+  frequency: 200
 
 video_logging:
   enabled: True
@@ -53,7 +49,7 @@ objects:
     type: static
     model_path: assets/mujoco/props/table.xml
     pose:
-      position: [0.0, 0, 0]
+      position: [0, 0, 0]
       orientation: [1, 0, 0, 0]
 
 # Add and configure cameras such as overall viewpoint

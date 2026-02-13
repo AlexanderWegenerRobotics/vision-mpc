@@ -158,3 +158,43 @@ class DataLogger:
                                f"but timestamps has {n_samples}")
         
         return data
+    
+    @staticmethod
+    def load_all(trial_path):
+        """
+        Load all bundles from a trial directory.
+        """
+        trial_path = Path(trial_path)
+        
+        if not trial_path.exists():
+            raise FileNotFoundError(f"Trial directory not found: {trial_path}")
+        
+        # Find all .h5 files in the trial directory
+        bundle_files = list(trial_path.glob("*.h5"))
+        
+        if len(bundle_files) == 0:
+            raise FileNotFoundError(f"No bundle files found in {trial_path}")
+        
+        all_bundles = {}
+        
+        for filepath in bundle_files:
+            bundle_name = filepath.stem  # Get filename without extension
+            
+            bundle_data = {}
+            with h5py.File(filepath, 'r') as f:
+                bundle_data['timestamps'] = f['timestamps'][:]
+                for key in f.keys():
+                    if key != 'timestamps':
+                        bundle_data[key] = f[key][:]
+            
+            # Verify data integrity
+            n_samples = len(bundle_data['timestamps'])
+            for key, values in bundle_data.items():
+                if key != 'timestamps' and len(values) != n_samples:
+                    raise ValueError(f"Data corruption in bundle '{bundle_name}': "
+                                f"'{key}' has {len(values)} samples "
+                                f"but timestamps has {n_samples}")
+            
+            all_bundles[bundle_name] = bundle_data
+        
+        return all_bundles
