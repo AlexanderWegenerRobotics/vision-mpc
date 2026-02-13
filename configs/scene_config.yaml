@@ -1,10 +1,9 @@
 world_model: assets/mujoco/scenes/world_scene.xml
-use_viewer: False
 
 render_cameras:
   - name: eye_in_hand
     attachment: arm
-    enabled: True
+    enabled: False
     width: 640
     height: 480
   
@@ -15,20 +14,40 @@ render_cameras:
     height: 480
 
 display:
-  layout: grid  # Options: horizontal, vertical, grid
+  # Options: horizontal, vertical, grid
+  layout: grid
   grid_cols: 2
   window_name: "Robot Camera Views"
 
+# Logging configuration
+logging:
+  enabled: True
+  frequency: 30
+  bundles:
+    - name: robot_state
+      type: robot_state
+      device: arm
+
+video_logging:
+  enabled: True
+  frequency: 10
+  cameras:
+    - workspace_overview
+
+# Add and configure devices such as robots
 devices:
   - name: arm
     type: robot
     enabled: True
-    model_path: assets/mujoco/robots/panda/panda_torque_eye_in_hand.xml
+    model_path: assets/mujoco/robots/panda/panda_nohand_torque_eye_in_hand.xml
+    urdf_path: assets/urdf/panda/panda.urdf
     base_pose:
       position: [0, 0, 0.425]
       orientation: [0, 0, 0, 1]
     q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398, 0.04, 0.04]
 
+
+# Add and configure objects such as table, box etc
 objects:
   - name: table
     type: static
@@ -37,10 +56,10 @@ objects:
       position: [0.0, 0, 0]
       orientation: [1, 0, 0, 0]
 
-
+# Add and configure cameras such as overall viewpoint
 cameras:
   - name: workspace_overview
     type: fixed
-    pos: [0.5, 0.5, 1.2]
-    quat: [0.924, -0.383, 0, 0]
+    pos: [0, -1.2, 0.8]
+    quat: [0.7071, 0.7071, 0, 0]
     fovy: 60

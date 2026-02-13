@@ -9,6 +9,8 @@ import time, threading
 from typing import Dict, List, Optional, Tuple
 
 from src.common.utils import load_yaml
+from src.common.robot_state import RobotState
+from src.common.video_logger import VideoLogger
 
 class DeviceInfo:
     """Stores metadata about a device (robot/sensor/object)."""
@@ -40,7 +42,6 @@ class SimulationModel:
         self.config = config
         self.logger = logger
         
-        # Build composite model from config
         self.mj_model, self.devices, self.objects = self._build_model_from_config(config)
         self.mj_data = mj.MjData(self.mj_model)
 
@@ -48,16 +49,17 @@ class SimulationModel:
         self.renderers = {}
         self._setup_cameras()
 
-        # Viewer settings
-        self.viewer = None
-        self.use_viewer = config.get('use_viewer', False)
-
         self._lock = threading.Lock()
         self.physics_thread = threading.Thread(target=self._physics_loop, daemon=True)
         self._command = np.zeros(self.mj_model.nu)
 
         self.running = False
         self.dt = self.mj_model.opt.timestep
+
+        self.log_config = config.get('logging', {})
+        self.log_frequency = self.log_config.get('frequency', 30)
+        self._log_counter = 0
+        self._log_interval = max(1, int((1.0 / self.log_frequency) / self.dt))
 
 
     def _build_model_from_config(self, config:Dict):
@@ -210,20 +212,31 @@ class SimulationModel:
             else:
                 print(f"Camera '{cam_name}' not found in model (tried: {prefixed_name})")
 
-    def start(self, with_viewer=False):
-        self.use_viewer = with_viewer or self.config.get("use_viewer")
+    def start(self):
         self.running = True
-        if self.use_viewer:
-            self._run_with_viewer()
-        else:
-            self.physics_thread.start()
+        self.physics_thread.start()
 
     def stop(self):
+        """Stop simulation gracefully"""
         self.running = False
-        if self.viewer is not None:
-            self.viewer.close()
-        elif self.physics_thread.is_alive():
+        if self.physics_thread.is_alive():
             self.physics_thread.join()
+
+    def get_state(self, device_name:str="arm") -> RobotState:
+        device = self.devices[device_name]
+        with self._lock:
+            q = self.mj_data.qpos[device.dof_ids].copy()
+            qd = self.mj_data.qvel[device.dof_ids].copy()
+            qdd = self.mj_data.qacc[device.dof_ids].copy()
+            tau = self.mj_data.actuator_force[device.actuator_ids].copy()
+        return RobotState(q=q, qd=qd, qdd=qdd, tau=tau)
+
+    def set_command(self, tau: np.array, device_name):
+        if device_name not in self.devices:
+            raise ValueError(f"Device '{device_name}' not found. Available: {list(self.devices.keys())}")
+        device = self.devices[device_name]
+        with self._lock:
+            self._command[device.actuator_ids] = tau
 
     def get_camera_image(self, camera_name: str) -> Optional[np.ndarray]:
         """Render image from specified camera."""
@@ -247,32 +260,46 @@ class SimulationModel:
                 self.mj_data.ctrl[:] = self._command
 
             mj.mj_step(self.mj_model, self.mj_data)
-            
+
+            if self.logger is not None:
+                self._log_counter += 1
+                if self._log_counter >= self._log_interval:
+                    self._log_step()
+                    self._log_counter = 0
+                        
             elapsed = time.time() - last_time
             sleep_time = self.dt - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
             else:
-                print(f"We are overrunning time step size in physics loop. Delta: {sleep_time}")
+                print(f"Simulation loop overrun: {-sleep_time:.4f}s")
             last_time = time.time()
 
+    def _log_step(self):
+        """Log current simulation state based on configuration."""
+        if self.logger is None:
+            return
+            
+        bundles_to_log = self.log_config.get('bundles', [])
+        
+        for bundle_cfg in bundles_to_log:
+            bundle_name = bundle_cfg.get('name')
+            bundle_type = bundle_cfg.get('type')
 
-    def _run_with_viewer(self):
-        """Run physics loop with interactive viewer (blocks main thread)."""
+            if bundle_type == 'robot_state':
+                device_name = bundle_cfg.get('device', 'arm')
+                state = self.get_state(device_name)
+                
+                self.logger.log_bundle(bundle_name, 
+                                       {
+                    'q': state.q,
+                    'qd': state.qd,
+                    'qdd': state.qdd,
+                    'tau': state.tau,
+                    'command': self._command[self.devices[device_name].actuator_ids].copy()
+                })
 
-        try:
-            self.viewer = mj.viewer.launch_passive(self.mj_model, self.mj_data)
-        except Exception as e:
-            raise RuntimeError(
-            "Failed to launch viewer. On macOS, you must run this script using 'mjpython' "
-            "instead of regular Python due to GUI threading requirements.\n"
-            f"Original error: {e}"
-        ) from e
-        while self.running and self.viewer.is_running():
-            mj.mj_step(self.mj_model, self.mj_data)
-            self.viewer.sync()
-            time.sleep(self.dt)
-
+        
 if __name__ == "__main__":
     from src.simulation.sim_display import SimulationDisplay
     

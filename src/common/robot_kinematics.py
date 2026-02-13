@@ -7,9 +7,8 @@ class RobotKinematics:
         self.data = self.model.createData()
         self.ee_frame_id = self.model.getFrameId("panda_hand")
 
-        print(f"Model has {self.model.nq} DOF")
-        print(f"Total mass: {sum([self.model.inertias[i].mass for i in range(1, self.model.njoints)])} kg")
-    
+        print("Loaded kinematics model")
+
     def forward_kinematics(self, q):
         pin.framesForwardKinematics(self.model, self.data, q)
         pose = self.data.oMf[self.ee_frame_id]

@@ -16,9 +16,9 @@ class JointPositionController(BaseController):
         self.robot_kin = robot_kinematics
     
     def compute_control(self, state, target):
-        q = state['q']
-        qd = state['qd']
-        q_desired = target['q']
+        q = state.q
+        qd = state.qd
+        q_desired = target
         tau_pd = self.kp * (q_desired - q) - self.kd * qd
         tau_gravity = self.robot_kin.get_gravity_torques(q)
         tau = tau_pd + tau_gravity

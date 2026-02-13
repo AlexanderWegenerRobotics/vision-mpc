@@ -14,11 +14,12 @@ class BaseController(ABC):
     def reset(self):
         pass
     
-    def validate_torques(self, tau, tau_max):
+    def validate_torques(self, tau, tau_max, verbose=False):
         tau_clipped = np.clip(tau, -tau_max, tau_max)
         if not np.allclose(tau, tau_clipped):
             exceeded = np.abs(tau) > tau_max
-            print(f"Warning: Torque limits exceeded on joints {np.where(exceeded)[0]}")
+            if verbose:
+                print(f"Warning: Torque limits exceeded on joints {np.where(exceeded)[0]}")
         return tau_clipped
     
     def is_initialized(self):
