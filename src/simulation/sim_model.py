@@ -222,14 +222,17 @@ class SimulationModel:
         if self.physics_thread.is_alive():
             self.physics_thread.join()
 
-    def get_state(self, device_name:str="arm") -> RobotState:
-        device = self.devices[device_name]
+    def get_state(self) -> Dict[str, RobotState]:
+        states = {}
         with self._lock:
-            q = self.mj_data.qpos[device.dof_ids].copy()
-            qd = self.mj_data.qvel[device.dof_ids].copy()
-            qdd = self.mj_data.qacc[device.dof_ids].copy()
-            tau = self.mj_data.actuator_force[device.actuator_ids].copy()
-        return RobotState(q=q, qd=qd, qdd=qdd, tau=tau)
+            for device_name, device in self.devices.items():
+                states[device_name] = RobotState(
+                    q=self.mj_data.qpos[device.dof_ids].copy(),
+                    qd=self.mj_data.qvel[device.dof_ids].copy(),
+                    qdd=self.mj_data.qacc[device.dof_ids].copy(),
+                    tau=self.mj_data.actuator_force[device.actuator_ids].copy()
+                )
+        return states
 
     def set_command(self, tau: np.array, device_name):
         if device_name not in self.devices:

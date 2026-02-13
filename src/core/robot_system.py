@@ -18,7 +18,6 @@ from src.common.utils import load_yaml
 class RobotSystem:
     def __init__(self, config: Dict):
         self.config = config
-        self.ctrl_cfg = load_yaml(self.config.get("controller_config"))
         self.sim_cfg = load_yaml(self.config.get("scene_config"))
 
         log_dir = Path(self.config.get("logging_path", "log/"))
@@ -37,14 +36,44 @@ class RobotSystem:
         self.sim = SimulationModel(config=self.sim_cfg, logger=self.logger)
         self.display = SimulationDisplay(sim=self.sim, config=self.sim_cfg, video_logger=self.video_logger)
         
-        self.robot_kin = RobotKinematics("assets/urdf/panda/panda.urdf")
-        self.ctrl = ControllerManager(config=self.ctrl_cfg, robot_kinematics=self.robot_kin)
-        
-        self.control_rate = 200
+        self.ctrl, kin_model = {}, {}
+        self._target = {}
+        for device in self.sim_cfg["devices"]:
+            device_name = device["name"]
+            base_pose = device["base_pose"]
+            dof = device["dof"]
+            q0 = device["q0"]
+            if q0 and len(q0) >= dof:
+                self._target[device_name] = np.array(q0[:dof])
+            else:
+                self._target[device_name] = np.zeros(dof)
+            urdf_path = device.get("urdf_path", None)
+            robot_kin = None
+            if urdf_path:
+                if urdf_path not in kin_model:
+                    robot_kin = RobotKinematics(urdf_path)
+                    kin_model[urdf_path] = robot_kin
+                else:
+                    robot_kin = kin_model[urdf_path]
+            param_path = device.get("ctrl_param")
+            if not param_path:
+                print(f"Warning! For {device_name} there is no control parameter file! Cant initialize model like this")
+                continue
+
+            ctrl_param = load_yaml(param_path)
+            cfg = {
+                "name":device_name,
+                "base_pose":base_pose,
+                "kinematic_model":robot_kin,
+                "control_param":ctrl_param
+            }
+                
+            self.ctrl[device_name] = ControllerManager(config=cfg)
+
+        self.control_rate = self.sim_cfg.get("control_rate", 200.0)
         self.dt = 1.0 / self.control_rate
         self.running = False
         
-        self._target = {'q': np.zeros(7)}
         self._lock = threading.Lock()
     
     def run(self):
@@ -89,24 +118,21 @@ class RobotSystem:
     def _loop(self):
         """Main control loop"""
         print("Control loop started")
-
-        self._target = np.array([0, -0.785, 0, -2.356, 0, 1.571, 0.785])
         
         while self.running:
             start_time = time.time()
             
             # Get current state from simulation
-            state = self.sim.get_state()
+            states = self.sim.get_state()
             
             # Get target
             with self._lock:
                 target = self._target.copy()
             
-            # Compute control
-            ctrl_vec = self.ctrl.compute_control(state, target)
-            
-            # Send to simulation
-            self.sim.set_command(tau=ctrl_vec, device_name="arm")
+            # Compute control & push to simulation
+            for name, ctrl in self.ctrl.items():
+                ctrl_vec = ctrl.compute_control(states[name], target[name])
+                self.sim.set_command(tau=ctrl_vec, device_name=name)
             
             # Timing
             elapsed = time.time() - start_time
@@ -127,10 +153,10 @@ class RobotSystem:
         """Get current state"""
         return self.sim.get_state()
     
-    def set_controller_mode(self, mode: str):
+    def set_controller_mode(self, device_name: str, mode: str):
         """Switch controller mode"""
-        self.ctrl.set_mode(mode)
-
+        if device_name in self.ctrl:
+            self.ctrl[device_name].set_mode(mode)
 
 if __name__ == "__main__":
     cfg = load_yaml("configs/global_config.yaml")

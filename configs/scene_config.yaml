@@ -1,9 +1,10 @@
 world_model: assets/mujoco/scenes/world_scene.xml
+control_rate: 200
 
 render_cameras:
   - name: eye_in_hand
     attachment: arm
-    enabled: False
+    enabled: True
     width: 640
     height: 480
   
@@ -26,9 +27,10 @@ logging:
 
 video_logging:
   enabled: True
-  frequency: 10
+  frequency: 20
   cameras:
     - workspace_overview
+    - eye_in_hand
 
 # Add and configure devices such as robots
 devices:
@@ -37,6 +39,8 @@ devices:
     enabled: True
     model_path: assets/mujoco/robots/panda/panda_nohand_torque_eye_in_hand.xml
     urdf_path: assets/urdf/panda/panda.urdf
+    ctrl_param: configs/control/panda_arm.yaml
+    dof: 7
     base_pose:
       position: [0, 0, 0.425]
       orientation: [0, 0, 0, 1]
