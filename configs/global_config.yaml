@@ -1,4 +1,2 @@
-world_model: assets/mujoco/scenes/tabletop_robot.xml
-pin_model: assets/urdf/panda/panda.urdf
-
+scene_config: configs/scene_config.yaml
 controller_config: configs/controller_config.yaml
