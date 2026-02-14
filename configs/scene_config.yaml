@@ -37,8 +37,8 @@ devices:
   - name: arm
     type: robot
     enabled: True
-    model_path: assets/mujoco/robots/panda/panda_nohand_torque_eye_in_hand.xml
-    urdf_path: assets/urdf/panda/panda.urdf
+    model_path: assets/mujoco/robots/franka_panda/panda_nohand_torque_eye_in_hand.xml
+    urdf_path: assets/urdf/franka_panda/panda.urdf
     urdf_ee_name: fr3_link8
     ctrl_param: configs/control/panda_arm.yaml
     dof: 7
@@ -46,7 +46,6 @@ devices:
       position: [0, 0, 0.425]
       orientation: [1, 0, 0, 0]
     q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]
-
 
 # Add and configure objects such as table, box etc
 objects:

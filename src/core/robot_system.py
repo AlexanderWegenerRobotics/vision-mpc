@@ -43,7 +43,7 @@ class RobotSystem:
             device_name = device["name"]
             base_pose = device["base_pose"]
             dof = device["dof"]
-            q0 = device["q0"]
+            q0 = device.get("q0")
             if q0 and len(q0) >= dof:
                 q_init = np.array(q0[:dof])
             else:
