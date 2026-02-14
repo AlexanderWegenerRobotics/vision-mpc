@@ -82,6 +82,10 @@ class RobotSystem:
         self.running = False
         
         self._lock = threading.Lock()
+
+        self._target["arm"]["x"] = [0.5, 0.0, 0.8, 0, 0, -np.pi]
+        self.ctrl["arm"].set_mode("impedance")
+        self.sim.set_target_pose(position=[0.5, 0.0, 0.8])
     
     def run(self):
         """Start all subsystems and block on display"""
@@ -151,7 +155,7 @@ class RobotSystem:
         
         print("Control loop stopped")
     
-    def set_target(self, device_name: str, target: Dict):
+    def set_target(self, device_name: str, target: Dict, verbose=False):
         """Set control target for a specific device"""
         with self._lock:
             if device_name not in self._target:
@@ -161,6 +165,10 @@ class RobotSystem:
             for key in ['q', 'x', 'xd']:
                 if key in target:
                     self._target[device_name][key] = target[key]
+
+            # Visualize Cartesian target if provided
+            if verbose and 'x' in target:
+                self.sim.set_target_pose(target['x'][:3])
     
     def get_state(self) -> Dict:
         """Get current state"""
@@ -176,7 +184,10 @@ if __name__ == "__main__":
     system = RobotSystem(cfg)
 
     try:
-        system.run() 
+        system.run()
+        system.set_controller_mode("arm", "impedance")
+        target = {"x" : [0.5, 0.0, 0.8]}
+        system.set_target(device_name="arm", target=target, verbose=True)
     except KeyboardInterrupt:
         print("\nInterrupted")
     finally:

@@ -44,7 +44,7 @@ devices:
     dof: 7
     base_pose:
       position: [0, 0, 0.425]
-      orientation: [0, 0, 0, 1]
+      orientation: [1, 0, 0, 0]
     q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398, 0.04, 0.04]
 
 
@@ -55,6 +55,13 @@ objects:
     model_path: assets/mujoco/props/table.xml
     pose:
       position: [0, 0, 0]
+      orientation: [1, 0, 0, 0]
+
+  - name: target_frame
+    type: visual
+    model_path: assets/mujoco/props/coordinate_frame.xml
+    pose:
+      position: [0, 0, 0.425]
       orientation: [1, 0, 0, 0]
 
 # Add and configure cameras such as overall viewpoint

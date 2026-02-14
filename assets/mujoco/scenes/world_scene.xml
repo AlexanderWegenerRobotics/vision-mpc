@@ -37,5 +37,8 @@
     <!-- Z axis (blue) -->
     <geom type="capsule" fromto="0 0 0   0 0 0.3" size="0.01" rgba="0 0 1 1"/>
 
+    <!-- Sphere to visualize poses -->
+    <site name="target_sphere" pos="0 0 0.5" size="0.03" rgba="1 0 0 0.5" type="sphere"/>
+
   </worldbody>
 </mujoco>

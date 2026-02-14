@@ -38,7 +38,7 @@ class ImpedanceController(BaseController):
         null_projector = np.eye(len(q)) - J_pinv @ J
         tau_null = self.K_null * (self.q_nominal - q)
         
-        tau = tau_task + null_projector @ tau_null
+        tau = tau_task #+ null_projector @ tau_null
         
         if self.gravity_comp:
             tau += self.robot_kin.get_gravity_torques(q)

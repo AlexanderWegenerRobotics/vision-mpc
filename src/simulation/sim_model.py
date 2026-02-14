@@ -61,6 +61,12 @@ class SimulationModel:
         self._log_counter = 0
         self._log_interval = max(1, int((1.0 / self.log_frequency) / self.dt))
 
+        self._target_site_id = None
+        try:
+            self._target_site_id = mj.mj_name2id(self.mj_model, mj.mjtObj.mjOBJ_SITE, "target_sphere")
+        except:
+            print("Warning: 'target_sphere' site not found in world model")
+
 
     def _build_model_from_config(self, config:Dict):
         """
@@ -318,6 +324,16 @@ class SimulationModel:
                         object_data['qdd'] = self.mj_data.qacc[object_info.dof_ids].copy()
                     
                     self.logger.log_bundle(object_name, object_data)
+
+    def set_target_pose(self, position, quaternion=None):
+        """Update target visualization sphere"""
+        if self._target_site_id is None:
+            return
+        
+        with self._lock:
+            self.mj_model.site_pos[self._target_site_id] = position
+            if quaternion is not None:
+                self.mj_model.site_quat[self._target_site_id] = quaternion
         
 if __name__ == "__main__":
     from src.simulation.sim_display import SimulationDisplay

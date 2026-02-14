@@ -1,0 +1,36 @@
+=<mujoco model="marker_sphere">
+    <worldbody>
+        <body name="marker_origin">
+            <!-- Sphere marker -->
+            <geom type="sphere" 
+                  size="0.03" 
+                  rgba="1 0 0 0.3" 
+                  contype="0" 
+                  conaffinity="0"/>
+            
+            <!-- X axis (red) -->
+            <geom type="capsule" 
+                  fromto="0 0 0 0.1 0 0" 
+                  size="0.005" 
+                  rgba="1 0 0 0.8" 
+                  contype="0" 
+                  conaffinity="0"/>
+            
+            <!-- Y axis (green) -->
+            <geom type="capsule" 
+                  fromto="0 0 0 0 0.1 0" 
+                  size="0.005" 
+                  rgba="0 1 0 0.8" 
+                  contype="0" 
+                  conaffinity="0"/>
+            
+            <!-- Z axis (blue) -->
+            <geom type="capsule" 
+                  fromto="0 0 0 0 0 0.1" 
+                  size="0.005" 
+                  rgba="0 0 1 0.8" 
+                  contype="0" 
+                  conaffinity="0"/>
+        </body>
+    </worldbody>
+</mujoco>
