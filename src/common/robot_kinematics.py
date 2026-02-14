@@ -32,3 +32,11 @@ class RobotKinematics:
         pin.forwardKinematics(self.model, self.data, q)
         tau_g = pin.computeGeneralizedGravity(self.model, self.data, q)
         return tau_g[:7]
+    
+    def get_mass_matrix(self, q):
+        pin.crba(self.model, self.data, q)
+        return self.data.M[:7, :7]
+
+    def get_coriolis_matrix(self, q, qd):
+        pin.computeCoriolisMatrix(self.model, self.data, q, qd)
+        return self.data.C[:7, :7]
