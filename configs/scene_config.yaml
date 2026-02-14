@@ -45,7 +45,7 @@ devices:
     base_pose:
       position: [0, 0, 0.425]
       orientation: [1, 0, 0, 0]
-    q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398, 0.04, 0.04]
+    q0: [0.0, -0.785398, 0.0, -2.356194, 0.0, 1.570796, 0.785398]
 
 
 # Add and configure objects such as table, box etc

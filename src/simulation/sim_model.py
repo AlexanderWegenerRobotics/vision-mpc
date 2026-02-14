@@ -45,6 +45,10 @@ class SimulationModel:
         self.mj_model, self.devices, self.objects = self._build_model_from_config(config)
         self.mj_data = mj.MjData(self.mj_model)
 
+        for device_name, device_info in self.devices.items():
+            if device_info.q0 is not None and len(device_info.q0) > 0:
+                self.mj_data.qpos[device_info.dof_ids] = device_info.q0
+
         self.cameras = {}
         self.renderers = {}
         self._setup_cameras()

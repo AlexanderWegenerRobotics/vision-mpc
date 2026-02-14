@@ -13,6 +13,7 @@ from src.common.robot_kinematics import RobotKinematics
 from src.common.data_logger import DataLogger
 from src.common.video_logger import VideoLogger
 from src.common.utils import load_yaml
+from src.common.pose import Pose
 
 
 class RobotSystem:
@@ -50,7 +51,7 @@ class RobotSystem:
 
             self._target[device_name] = {
                 'q': q_init,
-                'x': np.zeros(6),
+                'x': Pose(position=np.zeros(3), quaternion=np.array([1,0,0,0])),
                 'xd': np.zeros(6)
             }
             urdf_path = device.get("urdf_path", None)
@@ -75,7 +76,7 @@ class RobotSystem:
                 "control_param":ctrl_param
             }
                 
-            self.ctrl[device_name] = ControllerManager(config=cfg)
+            self.ctrl[device_name] = ControllerManager(config=cfg, logger=self.logger)
 
         self.control_rate = self.sim_cfg.get("control_rate", 200.0)
         self.dt = 1.0 / self.control_rate
@@ -83,7 +84,8 @@ class RobotSystem:
         
         self._lock = threading.Lock()
 
-        self._target["arm"]["x"] = [0.5, 0.0, 0.8, 0, 0, -np.pi]
+        self._target["arm"]["x"].set_position([0.5, 0.0, 0.8])
+        self._target["arm"]["x"].set_quaternion([0, 1, 0, 0])
         self.ctrl["arm"].set_mode("impedance")
         self.sim.set_target_pose(position=[0.5, 0.0, 0.8])
     
@@ -185,9 +187,6 @@ if __name__ == "__main__":
 
     try:
         system.run()
-        system.set_controller_mode("arm", "impedance")
-        target = {"x" : [0.5, 0.0, 0.8]}
-        system.set_target(device_name="arm", target=target, verbose=True)
     except KeyboardInterrupt:
         print("\nInterrupted")
     finally:

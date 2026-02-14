@@ -6,12 +6,15 @@ from scipy.spatial.transform import Rotation as R
 
 from src.controller.joint_position import JointPositionController
 from src.controller.impedance import ImpedanceController
+from src.common.pose import Pose
 
 class ControllerManager:
-    def __init__(self, config):
+    def __init__(self, config, logger=None):
         self.device_name = config["name"]
         self.base_pose = config["base_pose"]
         self.kin_model = config.get("kinematic_model", None)
+        
+        self.logger = logger
 
         pos = np.array(self.base_pose["position"])
         quat = self.base_pose["orientation"]  # [w,x,y,z]
@@ -30,22 +33,21 @@ class ControllerManager:
         self.controllers = {"idle": None}
         
         if "position" in ctrl_names:
-            self.controllers["position"] = JointPositionController(
-                available_controllers["position"], 
-                self.kin_model
-            )
+            self.controllers["position"] = JointPositionController(available_controllers["position"], self.kin_model)
         
         if "impedance" in ctrl_names:
-            self.controllers["impedance"] = ImpedanceController(
-                available_controllers["impedance"], 
-                self.kin_model
-            )
+            self.controllers["impedance"] = ImpedanceController(available_controllers["impedance"], self.kin_model)
         
         if self.mode not in self.controllers:
             print(f"Warning: Default mode '{self.mode}' not available for {self.device_name}. Using 'idle'.")
             self.mode = "idle"
         
         self.active_controller = self.controllers[self.mode]
+        
+        # Internal state for logging
+        self._current_state = None
+        self._current_target = None
+        self._current_output = None
     
     def set_mode(self, mode):
         if mode not in self.controllers:
@@ -59,8 +61,11 @@ class ControllerManager:
     
     def get_current_mode(self) -> str:
         return self.mode
-    
+        
     def compute_control(self, state, target) -> np.ndarray:
+        self._current_state = state
+        self._current_target = target
+
         if self.mode == "idle" or self.active_controller is None:
             return np.zeros(len(state.q))
         
@@ -70,44 +75,72 @@ class ControllerManager:
             target_base['x'] = self.transform_world_to_base_frame(target['x'])
             
             if 'xd' in target:
-                # Velocity only needs rotation (no translation offset)
                 xd_world = target['xd']
                 xd_base = np.concatenate([
-                    self.R_base_world.apply(xd_world[:3]),  # Linear velocity
-                    self.R_base_world.apply(xd_world[3:])   # Angular velocity
+                    self.R_base_world.apply(xd_world[:3]),
+                    self.R_base_world.apply(xd_world[3:])
                 ])
                 target_base['xd'] = xd_base
+            target = target_base
             
-            return self.active_controller.compute_control(state, target_base)
-        
-        return self.active_controller.compute_control(state, target)
-    
-    def transform_world_to_base_frame(self, pose):
-        """Transform 6D pose [x,y,z,rx,ry,rz] from world to base frame"""
-        pos_world = pose[:3]
-        rot_world = pose[3:]
-        
-        # Position: p_base = R_base_world * (p_world - p_world_base)
-        pos_base = self.R_base_world.apply(pos_world - self.p_world_base)
-        
-        # Rotation: R_base = R_base_world * R_world
-        R_world_ee = R.from_rotvec(rot_world)
-        R_base_ee = self.R_base_world * R_world_ee
-        rot_base = R_base_ee.as_rotvec()
-        
-        return np.concatenate([pos_base, rot_base])
+        ctrl_vec = self.active_controller.compute_control(state, target)
+        self._current_output = ctrl_vec
 
-    def transform_base_to_world_frame(self, pose):
-        """Transform 6D pose [x,y,z,rx,ry,rz] from base to world frame"""
-        pos_base = pose[:3]
-        rot_base = pose[3:]
+        if self.logger is not None:
+            self._log_step()
         
-        # Position: p_world = R_world_base * p_base + p_world_base
-        pos_world = self.R_world_base.apply(pos_base) + self.p_world_base
+        return ctrl_vec
+
+    def transform_world_to_base_frame(self, pose_world):
+        """Transform Pose from world to base frame"""
+        pos_base = self.R_base_world.apply(pose_world.position - self.p_world_base)
+        R_base_ee = self.R_base_world.as_matrix() @ pose_world.rotation_matrix
+        return Pose.from_matrix(pos_base, R_base_ee)
+
+    def transform_base_to_world_frame(self, pose_base):
+        """Transform Pose from base to world frame"""
+        pos_world = self.R_world_base.apply(pose_base.position) + self.p_world_base
+        R_world_ee = self.R_world_base.as_matrix() @ pose_base.rotation_matrix
+        return Pose.from_matrix(pos_world, R_world_ee)
+    
+    def _log_step(self):
+        """
+        Log control input/output signals to bundle: ctrl_{device_name}
+        """
+        if self._current_state is None or self._current_output is None:
+            return
         
-        # Rotation: R_world = R_world_base * R_base
-        R_base_ee = R.from_rotvec(rot_base)
-        R_world_ee = self.R_world_base * R_base_ee
-        rot_world = R_world_ee.as_rotvec()
+        bundle_name = f"ctrl_{self.device_name}"
+
+        x_current = self.kin_model.forward_kinematics(self._current_state.q)
+        xd_current = self.kin_model.get_ee_velocity(self._current_state.q, self._current_state.qd)
+
+        # Build log data dictionary
+        log_data = {
+            # Input: state
+            'q': self._current_state.q,
+            'qd': self._current_state.qd,
+            
+            # Input: target (mode-dependent)
+            'q_target': self._current_target.get('q', np.zeros_like(self._current_state.q)),
+            'x_target': self._current_target['x'].as_7d() if isinstance(self._current_target.get('x'), Pose) else np.zeros(7),
+            'x_current': x_current.as_7d(),
+            'xd_target': self._current_target.get('xd', np.zeros(6)),
+            'xd_current' : xd_current,
+            # Output: control
+            'tau': self._current_output,
+            
+            # Metadata
+            'mode': np.array([self._mode_to_int(self.mode)])
+        }
         
-        return np.concatenate([pos_world, rot_world])
+        self.logger.log_bundle(bundle_name, log_data)
+    
+    def _mode_to_int(self, mode: str) -> int:
+        """Convert mode string to integer for HDF5 storage"""
+        mode_map = {
+            'idle': 0,
+            'position': 1,
+            'impedance': 2
+        }
+        return mode_map.get(mode, -1)

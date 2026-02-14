@@ -1,8 +1,10 @@
 import numpy as np
 import pinocchio as pin
+from src.common.pose import Pose
+
 
 class RobotKinematics:
-    def __init__(self, urdf_path:str, ee_frame_name:str):
+    def __init__(self, urdf_path: str, ee_frame_name: str):
         self.model = pin.buildModelFromUrdf(urdf_path)
         self.data = self.model.createData()
         
@@ -12,14 +14,10 @@ class RobotKinematics:
             print(f"Available frames: {[self.model.frames[i].name for i in range(self.model.nframes)]}")
             raise ValueError(f"Frame '{ee_frame_name}' not found in URDF")
         
-        print(f"Loaded kinematics model with EE frame: {ee_frame_name}")
-
     def forward_kinematics(self, q):
         pin.framesForwardKinematics(self.model, self.data, q)
         pose = self.data.oMf[self.ee_frame_id]
-        position = pose.translation
-        rotation = pin.rpy.matrixToRpy(pose.rotation)
-        return np.concatenate([position, rotation])
+        return Pose.from_matrix(pose.translation.copy(), pose.rotation.copy())
     
     def get_jacobian(self, q):
         pin.computeJointJacobians(self.model, self.data, q)

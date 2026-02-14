@@ -3,7 +3,9 @@ from pathlib import Path
 sys.path.insert(1, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
+import pinocchio as pin
 from src.controller.base_controller import BaseController
+
 
 class ImpedanceController(BaseController):
     def __init__(self, config, robot_kinematics=None):
@@ -24,21 +26,32 @@ class ImpedanceController(BaseController):
     def compute_control(self, state, target):
         q = state.q
         qd = state.qd
-        x_desired = target['x']
+        x_desired = target['x']      # Pose object
         xd_desired = target.get('xd', np.zeros(6))
         
         x_current = self.robot_kin.forward_kinematics(q)
         xd_current = self.robot_kin.get_ee_velocity(q, qd)
         J = self.robot_kin.get_jacobian(q)
         
-        F = self.K_cart @ (x_desired - x_current) + self.D_cart @ (xd_desired - xd_current)
+        # Position error (base frame)
+        e_pos = x_desired.position - x_current.position
+        
+        # Orientation error via SO(3) logarithmic map
+        R_current = x_current.rotation_matrix
+        R_desired = x_desired.rotation_matrix
+        R_error = R_desired @ R_current.T
+        e_rot = pin.log3(R_error)
+        
+        e = np.concatenate([e_pos, e_rot])
+        
+        F = self.K_cart @ e + self.D_cart @ (xd_desired - xd_current)
         tau_task = J.T @ F
         
         J_pinv = np.linalg.pinv(J)
         null_projector = np.eye(len(q)) - J_pinv @ J
         tau_null = self.K_null * (self.q_nominal - q)
         
-        tau = tau_task #+ null_projector @ tau_null
+        tau = tau_task + null_projector @ tau_null
         
         if self.gravity_comp:
             tau += self.robot_kin.get_gravity_torques(q)
