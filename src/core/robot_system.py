@@ -44,14 +44,21 @@ class RobotSystem:
             dof = device["dof"]
             q0 = device["q0"]
             if q0 and len(q0) >= dof:
-                self._target[device_name] = np.array(q0[:dof])
+                q_init = np.array(q0[:dof])
             else:
-                self._target[device_name] = np.zeros(dof)
+                q_init = np.zeros(dof)
+
+            self._target[device_name] = {
+                'q': q_init,
+                'x': np.zeros(6),
+                'xd': np.zeros(6)
+            }
             urdf_path = device.get("urdf_path", None)
+            urdf_ee_name = device.get("urdf_ee_name", None)
             robot_kin = None
-            if urdf_path:
+            if urdf_path and urdf_ee_name:
                 if urdf_path not in kin_model:
-                    robot_kin = RobotKinematics(urdf_path)
+                    robot_kin = RobotKinematics(urdf_path=urdf_path, ee_frame_name=urdf_ee_name)
                     kin_model[urdf_path] = robot_kin
                 else:
                     robot_kin = kin_model[urdf_path]
@@ -144,10 +151,16 @@ class RobotSystem:
         
         print("Control loop stopped")
     
-    def set_target(self, target: Dict):
-        """Set control target from outside"""
+    def set_target(self, device_name: str, target: Dict):
+        """Set control target for a specific device"""
         with self._lock:
-            self._target = target
+            if device_name not in self._target:
+                raise ValueError(f"Unknown device: {device_name}")
+            
+            # Update only provided keys
+            for key in ['q', 'x', 'xd']:
+                if key in target:
+                    self._target[device_name][key] = target[key]
     
     def get_state(self) -> Dict:
         """Get current state"""

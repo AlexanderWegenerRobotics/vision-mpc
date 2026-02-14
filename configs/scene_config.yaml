@@ -4,7 +4,7 @@ control_rate: 200
 render_cameras:
   - name: eye_in_hand
     attachment: arm
-    enabled: True
+    enabled: False
     width: 640
     height: 480
   
@@ -39,6 +39,7 @@ devices:
     enabled: True
     model_path: assets/mujoco/robots/panda/panda_nohand_torque_eye_in_hand.xml
     urdf_path: assets/urdf/panda/panda.urdf
+    urdf_ee_name: fr3_link8
     ctrl_param: configs/control/panda_arm.yaml
     dof: 7
     base_pose:

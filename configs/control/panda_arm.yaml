@@ -1,4 +1,4 @@
-default_mode: "position"
+default_mode: "impedance"
 
 position:
   kp: [300, 300, 300, 300, 300, 80, 80]

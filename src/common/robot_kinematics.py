@@ -2,12 +2,17 @@ import numpy as np
 import pinocchio as pin
 
 class RobotKinematics:
-    def __init__(self, urdf_path):
+    def __init__(self, urdf_path:str, ee_frame_name:str):
         self.model = pin.buildModelFromUrdf(urdf_path)
         self.data = self.model.createData()
-        self.ee_frame_id = self.model.getFrameId("panda_hand")
-
-        print("Loaded kinematics model")
+        
+        try:
+            self.ee_frame_id = self.model.getFrameId(ee_frame_name)
+        except:
+            print(f"Available frames: {[self.model.frames[i].name for i in range(self.model.nframes)]}")
+            raise ValueError(f"Frame '{ee_frame_name}' not found in URDF")
+        
+        print(f"Loaded kinematics model with EE frame: {ee_frame_name}")
 
     def forward_kinematics(self, q):
         pin.framesForwardKinematics(self.model, self.data, q)
