@@ -1,5 +1,6 @@
 world_model: assets/mujoco/scenes/world_scene.xml
 control_rate: 200
+render_fps: 30
 
 render_cameras:
   - name: eye_in_hand
@@ -15,6 +16,7 @@ render_cameras:
     height: 480
 
 display:
+  enabled: True
   # Options: horizontal, vertical, grid
   layout: grid
   grid_cols: 2
@@ -31,6 +33,23 @@ video_logging:
   cameras:
     - workspace_overview
     - eye_in_hand
+
+# Streaming configuration
+streaming:
+  enabled: True
+  streams:
+    - camera: workspace_overview
+      backend: gstreamer_udp
+      host: 10.0.0.156
+      port: 5000
+      bitrate: 2000
+      speed_preset: ultrafast
+      tune: zerolatency
+    # Example: add a second stream for eye-in-hand on a different port
+    # - camera: eye_in_hand
+    #   backend: gstreamer_udp
+    #   host: 127.0.0.1
+    #   port: 5001
 
 # Add and configure devices such as robots
 devices:
@@ -61,6 +80,13 @@ objects:
     model_path: assets/mujoco/props/coordinate_frame.xml
     pose:
       position: [0, 0, 0.425]
+      orientation: [1, 0, 0, 0]
+
+  - name: box
+    type: visual
+    model_path: assets/mujoco/props/box.xml
+    pose:
+      position: [0.5, 0, 0.425]
       orientation: [1, 0, 0, 0]
 
 # Add and configure cameras such as overall viewpoint
