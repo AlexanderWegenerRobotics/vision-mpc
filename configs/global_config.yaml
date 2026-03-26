@@ -3,4 +3,4 @@ stream_config: configs/stream_config.yaml
 headless: False
 
 logging_path: log/
-trial_name: my_trial
+trial_name: experimental

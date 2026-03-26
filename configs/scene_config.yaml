@@ -1,26 +1,26 @@
 world_model: assets/mujoco/scenes/world_scene.xml
-control_rate: 200
 render_fps: 30
 
-render_cameras:
-  - name: eye_in_hand
-    attachment: arm
-    enabled: False
-    width: 640
-    height: 480
-  
-  - name: workspace_overview
-    attachment: False
-    enabled: True
-    width: 640
-    height: 480
-
+headless: False
 display:
   enabled: True
   # Options: horizontal, vertical, grid
   layout: grid
   grid_cols: 2
   window_name: "Robot Camera Views"
+
+render_cameras:
+  - name: eye_in_hand
+    attachment: arm
+    enabled: False
+    width: 1280
+    height: 720
+  
+  - name: workspace_overview
+    attachment: False
+    enabled: True
+    width: 1280
+    height: 720
 
 # Logging configuration
 logging:
@@ -34,30 +34,13 @@ video_logging:
     - workspace_overview
     - eye_in_hand
 
-# Streaming configuration
-streaming:
-  enabled: True
-  streams:
-    - camera: workspace_overview
-      backend: gstreamer_udp
-      host: 10.0.0.156
-      port: 5000
-      bitrate: 2000
-      speed_preset: ultrafast
-      tune: zerolatency
-    # Example: add a second stream for eye-in-hand on a different port
-    # - camera: eye_in_hand
-    #   backend: gstreamer_udp
-    #   host: 127.0.0.1
-    #   port: 5001
-
 # Add and configure devices such as robots
 devices:
   - name: arm
     type: robot
     enabled: True
-    model_path: assets/mujoco/robots/franka_panda/panda_nohand_torque_eye_in_hand.xml
-    urdf_path: assets/urdf/franka_panda/panda.urdf
+    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/franka_fr3/fr3_eye_hand_pusher.xml
+    urdf_path: assets/urdf/franka_fr3/panda.urdf
     urdf_ee_name: fr3_link8
     ctrl_param: configs/control/panda_arm.yaml
     dof: 7
@@ -72,27 +55,27 @@ objects:
     type: static
     model_path: assets/mujoco/props/table.xml
     pose:
-      position: [0, 0, 0]
-      orientation: [1, 0, 0, 0]
-
-  - name: target_frame
-    type: visual
-    model_path: assets/mujoco/props/coordinate_frame.xml
-    pose:
-      position: [0, 0, 0.425]
+      position: [0.4, 0, 0]
       orientation: [1, 0, 0, 0]
 
   - name: box
     type: visual
-    model_path: assets/mujoco/props/box.xml
+    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/box.xml
     pose:
-      position: [0.5, 0, 0.425]
-      orientation: [1, 0, 0, 0]
+      position: [0.5, -0.05, 0.425]
+      orientation: [0.9763, 0, 0, 0.2165]
+  
+  - name: target
+    type: visual
+    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
+    pose:
+      position: [0.75, 0.2, 0.44]
+      orientation: [0.9239, 0, 0, 0.3827]
 
 # Add and configure cameras such as overall viewpoint
 cameras:
   - name: workspace_overview
     type: fixed
-    pos: [0, -1.2, 0.8]
-    quat: [0.7071, 0.7071, 0, 0]
-    fovy: 60
+    pos: [0.5, 0.5, 1.2]
+    look_at: [0.5, 0.0, 0.8]
+    fovy: 90
