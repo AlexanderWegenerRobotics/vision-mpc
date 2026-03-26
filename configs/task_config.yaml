@@ -1,0 +1,13 @@
+
+
+slider_name: "box"
+arm_name: "arm"
+
+pusher_length: 0.016
+pusher_radius: 0.08
+pusher_clearance: 0.001
+
+slider_half_x: 0.025
+slider_half_y: 0.025
+
+surface_height_world: 0.425

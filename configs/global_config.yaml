@@ -1,5 +1,6 @@
 scene_config: configs/scene_config.yaml
-stream_config: configs/stream_config.yaml 
+stream_config: configs/stream_config.yaml
+task_config: configs/task_config.yaml
 headless: False
 
 logging_path: log/
