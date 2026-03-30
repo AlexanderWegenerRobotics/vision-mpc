@@ -1,4 +1,5 @@
 # Python
+c_generated_code/
 __pycache__/
 *.pyc
 *.pyo
@@ -6,6 +7,7 @@ __pycache__/
 .Python
 *.so
 *.egg-info/
+pusher_slider_ocp.json
 
 # Data and logs
 log/

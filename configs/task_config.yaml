@@ -6,7 +6,7 @@ arm_name: "arm"
 pusher_length: 0.167
 pusher_radius: 0.016
 pusher_clearance: 0.001
-pusher_standoff: 0.005
+pusher_standoff: 0.01
 
 slider_half_z: 0.03
 slider_half_x: 0.05
@@ -17,8 +17,8 @@ surface_height_world: 0.425
 q_init: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
 
 workspace:
-  x: [0.35, 0.75]
-  y: [-0.35, 0.35]
+  x: [0.3, 0.7]
+  y: [-0.3, 0.3]
 
 slider_init:
   theta_range: [-3.14159, 3.14159]   # full SO(2)
@@ -27,3 +27,26 @@ goal:
   theta_range: [-3.14159, 3.14159]
 
 min_start_goal_dist: 0.20            # metres, Euclidean on xy
+
+
+goal_pos_tol:   0.010
+goal_theta_tol: 0.087   # ~5 degrees
+
+mpc:
+  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  horizon: 20
+  dt: 0.05
+  Q: [50.0, 50.0, 5.0, 1.0]
+  R: [1.0, 1.0]
+  Q_terminal_scale: 10.0
+  v_n_max: 0.1
+  v_t_max: 0.1
+  mu_slider: 0.3
+  mu_ground: 0.3
+  slider_mass: 0.1
+  beta: 1.0
+  kappa: 2.0
+  r_obs: 0.0
+  r_margin: 0.05
+  q_obs: null
+  v_n_min: 0.1
