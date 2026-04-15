@@ -101,6 +101,7 @@ class PusherSliderController:
 
     def run_pushing(self) -> Phase:
         x_slider = self._get_slider_state()
+        self._update_slider_frame(x_slider)
         py = self._compute_py(x_slider, self.contact_face)
         x0_mpc = np.array([x_slider[0], x_slider[1], x_slider[2], py])
         effective_goal_theta = PusherSliderNMPC._normalize_goal_theta(x_slider[2], self.goal_theta)
@@ -108,6 +109,7 @@ class PusherSliderController:
         x_ref = PusherSliderNMPC.make_linear_reference(x0_mpc, x_goal_mpc, self._nmpc.T)
         u_opt = self._nmpc.solve(x0_mpc, x_ref)
         ee_vel_world = self._contact_vel_to_ee_vel(u_opt, x_slider, py, self.contact_face)
+        self._update_vel_arrow(ee_vel_world) 
 
         ee_pose_cmd = self._get_ee_pose()
         ee_pose_cmd.quaternion = self.ee_quat_ref
@@ -134,18 +136,11 @@ class PusherSliderController:
         return float(d_body[0] if face in (0, 1) else d_body[1])
 
     def _contact_vel_to_ee_vel(self, u, x_slider, py, face):
-        v_n, v_t = u[0], u[1]
         theta = x_slider[2]
         n_body, t_body = self.body_normals[face], self.body_tangents[face]
-
-        x0 = np.array([x_slider[0], x_slider[1], theta, py])
-        xdot = self._ps_model.evaluate(x0, u)  # [x^dot_s, y^dot_s, theta^dot, p^dot_y] in world frame
-        slider_vel_world = xdot[:2]
-        rel_vel_body = -v_n * n_body + v_t * t_body
-        rel_vel_world = rotation_body_to_world(theta) @ rel_vel_body
-
-        vel_world_2d = slider_vel_world + rel_vel_world
-        return np.array([vel_world_2d[0], vel_world_2d[1], 0.0])
+        pusher_vel_body = -u[0] * n_body + u[1] * t_body
+        pusher_vel_world = rotation_body_to_world(theta) @ pusher_vel_body
+        return np.array([pusher_vel_world[0], pusher_vel_world[1], 0.0])
 
     def _get_slider_state(self) -> tuple[np.ndarray, np.ndarray]:
         slider  = self.system.get_object_states()[self.slider_name]
@@ -242,3 +237,45 @@ class PusherSliderController:
         self.system.set_target("arm", {"x": Pose(position=ee_pose.position, quaternion=self.ee_quat_ref)})
         self.system.sim.forward()
 
+        x_slider = self._get_slider_state()
+        self._update_slider_frame(x_slider)
+
+
+
+    def _update_slider_frame(self, x_slider: np.ndarray):
+        slider_z = self.config["surface_height_world"] + self.config["slider_half_z"]
+        pos = np.array([x_slider[0], x_slider[1], slider_z])
+        quat_xyzw = Rotation.from_euler("z", x_slider[2]).as_quat()
+        quat_wxyz = np.array([quat_xyzw[3], *quat_xyzw[:3]])
+        self.system.sim.reset_object_pose("slider_frame", pos, quat_wxyz)
+
+
+    def _update_vel_arrow(self, ee_vel_world: np.ndarray):
+        vel_2d = ee_vel_world[:2]
+        speed  = np.linalg.norm(vel_2d)
+        if speed < 1e-4:
+            return
+
+        half_len   = np.clip(speed * 1.0, 0.02, 0.2)
+        geom_id = self.system.sim.mj_model.geom("vel_arrow/vel_arrow_shaft").id
+        self.system.sim.mj_model.geom_size[geom_id] = [0.005, half_len, 0]
+
+        ee_pose = self._get_ee_pose()
+        pos = ee_pose.position.copy()
+        pos[2] = self.z_goal
+
+        vel_dir = np.array([vel_2d[0], vel_2d[1], 0.0]) / speed
+        z_axis  = np.array([0.0, 0.0, 1.0])
+        axis    = np.cross(z_axis, vel_dir)
+        angle   = np.arccos(np.clip(np.dot(z_axis, vel_dir), -1, 1))
+
+        if np.linalg.norm(axis) < 1e-6:
+            quat_xyzw = np.array([0, 0, 0, 1])
+        else:
+            axis      = axis / np.linalg.norm(axis)
+            quat_xyzw = np.array([*(axis * np.sin(angle / 2)), np.cos(angle / 2)])
+
+        quat_wxyz = np.array([quat_xyzw[3], *quat_xyzw[:3]])
+        # offset body origin to base of arrow
+        pos += vel_dir * half_len
+        self.system.sim.reset_object_pose("vel_arrow", pos, quat_wxyz)
