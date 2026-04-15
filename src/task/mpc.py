@@ -11,8 +11,15 @@ class ControllerVariant(Enum):
 
 
 class PusherSliderModel:
-    def __init__(self, params: dict):
-        self.params = params
+    def __init__(self, config: dict):
+        self.params = {
+            "slider_half_x": config["slider_half_x"],
+            "slider_half_y": config["slider_half_y"],
+            "mu_slider":     config["mpc"]["mu_slider"],
+            "mu_ground":     config["mpc"]["mu_ground"],
+            "slider_mass":   config["mpc"]["slider_mass"],
+            "gravity":       9.81,
+        }
         self._build_symbols()
         self._build_dynamics()
 
@@ -35,9 +42,8 @@ class PusherSliderModel:
         gamma_t = (mu * c2 - p_x * p_y + mu * p_x**2) / (c2 + p_y**2 - mu * p_x * p_y)
         gamma_b = (-mu * c2 - p_x * p_y - mu * p_x**2) / (c2 + p_y**2 + mu * p_x * p_y)
 
-        vc_n = ca.if_else(self.v_t > gamma_t * self.v_n, self.v_n, self.v_n)
+        vc_n = self.v_n
         vc_t = ca.if_else(self.v_t > gamma_t * self.v_n, self.v_n * gamma_t, self.v_t)
-        vc_n = ca.if_else(self.v_t < gamma_b * self.v_n, self.v_n, vc_n)
         vc_t = ca.if_else(self.v_t < gamma_b * self.v_n, self.v_n * gamma_b, vc_t)
 
         denom    = c2 + p_x**2 + p_y**2
@@ -70,11 +76,29 @@ class PusherSliderModel:
 
 
 class PusherSliderNMPC:
-    def __init__(self, model: PusherSliderModel, params: dict):
+    def __init__(self, model: PusherSliderModel, config: dict):
         self.model   = model
-        self.params  = params
-        self.variant = params["variant"]
-        self.T       = params["horizon"]
+        mpc_cfg = config["mpc"]
+        self.variant = ControllerVariant[config["mpc"]["variant"]]
+        self.params = {
+            "horizon":          mpc_cfg["horizon"],
+            "dt":               mpc_cfg["dt"],
+            "Q":                mpc_cfg["Q"],
+            "R":                mpc_cfg["R"],
+            "Q_terminal_scale": mpc_cfg["Q_terminal_scale"],
+            "v_n_max":          mpc_cfg["v_n_max"],
+            "v_t_max":          mpc_cfg["v_t_max"],
+            "slider_half_y":    config["slider_half_y"],
+            "variant":          self.variant,
+            "beta":             mpc_cfg.get("beta", 1.0),
+            "kappa":            mpc_cfg.get("kappa", 2.0),
+            "r_obs":            mpc_cfg.get("r_obs", 0.0),
+            "r_margin":         mpc_cfg.get("r_margin", 0.05),
+            "q_obs":            mpc_cfg.get("q_obs", None),
+            "v_n_min":          mpc_cfg.get("v_n_min", 0),
+        }
+                
+        self.T       = self.params["horizon"]
         self.nx      = model.nx
         self.nu      = model.nu
         self._build_solver()
@@ -189,6 +213,14 @@ class PusherSliderNMPC:
         W[:self.nx, :self.nx] = Q
         W[self.nx:, self.nx:] = self._R_mat
         return W
+
+    @staticmethod
+    def _normalize_goal_theta(current_theta: float, goal_theta: float) -> float:
+        """For a rectangle, snap goal_theta to the nearest equivalent orientation (mod π/2)."""
+        candidates = [goal_theta + k * (np.pi / 2) for k in range(-2, 3)]
+        deltas = [(c - current_theta + np.pi) % (2 * np.pi) - np.pi for c in candidates]
+        best = min(zip(deltas, candidates), key=lambda x: abs(x[0]))
+        return best[1]
 
     @staticmethod
     def make_linear_reference(x_start, x_goal, T):
