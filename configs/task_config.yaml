@@ -1,5 +1,4 @@
-
-iterations: 10
+iterations: 1
 slider_name: "box"
 arm_name: "arm"
 
@@ -20,33 +19,28 @@ workspace:
   x: [0.4, 0.6]
   y: [-0.3, 0.3]
 
-slider_init:
-  theta_range: [-3.14159, 3.14159]   # full SO(2)
+# Pusher on -x_body face, pushing slider in +x_world direction
+slider_start:
+  xy: [0.5, 0.0]
+  theta: 0.0
 
 goal:
-  theta_range: [-3.14159, 3.14159]
-
-min_start_goal_dist: 0.20            # metres, Euclidean on xy
-
+  xy: [0.65, 0.0]
+  theta: 0.0
 
 goal_pos_tol:   0.010
-goal_theta_tol: 0.087   # ~5 degrees
+goal_theta_tol: 0.087
 
 mpc:
-  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
-  horizon: 20
+  variant: "BASELINE"
+  horizon: 40
   dt: 0.05
-  Q: [50.0, 50.0, 5.0, 0.1]
-  R: [1.0, 1.0]
-  Q_terminal_scale: 10.0
-  v_n_max: 0.5
-  v_t_max: 0.5
+  Q: [30.0, 30.0, 10.0, 0.5]
+  R: [10.0, 10.0]
+  Q_terminal_scale: 20.0
+  v_n_max: 0.05
+  v_t_max: 0.05
   mu_slider: 0.3
   mu_ground: 0.3
   slider_mass: 0.1
-  beta: 1.0
-  kappa: 2.0
-  r_obs: 0.0
-  r_margin: 0.05
-  q_obs: null
-  v_n_min: 0.05
+  v_n_min: 0.0

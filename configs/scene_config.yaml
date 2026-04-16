@@ -83,7 +83,7 @@ objects:
     type: visual
     model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/arrow.xml
     pose:
-      position: [0.5, 0.0, 0.5]
+      position: [0.0, 0.0, 0.0]
       orientation: [1, 0, 0, 0]
 
 # Add and configure cameras such as overall viewpoint
@@ -93,3 +93,18 @@ cameras:
     pos: [0.5, 0.5, 1.2]
     look_at: [0.5, 0.0, 0.8]
     fovy: 90
+
+visualizations:
+  trails:
+    - name: "ee_trail"
+      enabled: true
+      n_points: 200
+      color: [0.2, 0.6, 1.0, 0.8]
+      radius: 0.005
+      hidden_pos: [0.0, 0.0, -1.0]
+    - name: "slider_trail"
+      enabled: true
+      n_points: 200
+      color: [1.0, 0.3, 0.3, 0.8]
+      radius: 0.005
+      hidden_pos: [0.0, 0.0, -1.0]
