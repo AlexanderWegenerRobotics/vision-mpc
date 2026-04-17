@@ -14,5 +14,5 @@ impedance:
 dynamic_impedance:
   K_cart: [700, 700, 700, 160, 160, 160]
   D_cart: [55, 55, 55, 25, 25, 25]
-  K_null: 0
+  K_null: 5
   tau_max: [87, 87, 87, 87, 12, 12, 12]

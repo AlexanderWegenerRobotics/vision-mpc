@@ -2,7 +2,7 @@
   <compiler angle="radian" autolimits="true"/>
 
   <asset>
-    <material name="box_mat" rgba="0.2 0.6 0.85 1" specular="0.4" shininess="0.2"/>
+    <material name="box_mat" rgba="0.2 0.6 0.85 0.3" specular="0.4" shininess="0.2"/>
   </asset>
 
   <worldbody>

@@ -11,18 +11,6 @@ class ControllerVariant(Enum):
 
 
 class PusherSliderModel:
-    """Quasi-static pusher-slider dynamics following Hogan & Rodriguez / Federico et al.
-
-    State:  x = [x_s, y_s, theta_s, p_y]
-    Control: u = [v_n, v_t]
-
-    Convention (pusher on -x_body face, pushing in +x_body):
-      p_x  = fixed perpendicular distance from CoM to contact face = slider_half_x
-      p_y  = tangential offset of pusher along the face (y_body direction, state variable)
-      v_n  > 0  pushes into the slider (along +x_body, i.e. inward normal)
-      v_t  > 0  slides the pusher along the face in +y_body direction
-    """
-
     def __init__(self, config: dict):
         self.params = {
             "slider_half_x": config["slider_half_x"],
@@ -46,15 +34,12 @@ class PusherSliderModel:
         c2  = (a**2 + b**2) / 12.0
         mu  = p["mu_slider"]
 
-        # p_x = perpendicular distance from CoM to contact face
-        # The dynamics assume pusher on -x_body face, so p_x = slider_half_x
         p_x = p["slider_half_x"]
         p_y = self.p_y
 
         gamma_t = ( mu * c2 - p_x * p_y + mu * p_x**2) / (c2 + p_y**2 - mu * p_x * p_y)
         gamma_b = (-mu * c2 - p_x * p_y - mu * p_x**2) / (c2 + p_y**2 + mu * p_x * p_y)
 
-        # Clamp v_t to motion cone boundaries
         vc_n = self.v_n
         vc_t = ca.if_else(self.v_t > gamma_t * self.v_n, self.v_n * gamma_t, self.v_t)
         vc_t = ca.if_else(self.v_t < gamma_b * self.v_n, self.v_n * gamma_b, vc_t)
@@ -68,8 +53,6 @@ class PusherSliderModel:
         cos_th = ca.cos(self.theta_s)
         sin_th = ca.sin(self.theta_s)
 
-        # xdot_b, ydot_b are slider CoM velocity in body frame
-        # Rotate to world frame
         self.f_expr = ca.vertcat(
             cos_th * xdot_b - sin_th * ydot_b,
             sin_th * xdot_b + cos_th * ydot_b,
@@ -106,11 +89,13 @@ class PusherSliderNMPC:
             "v_n_min":          mpc_cfg.get("v_n_min", 0.0),
             "slider_half_x":    config["slider_half_x"],
             "slider_half_y":    config["slider_half_y"],
+            "nlp_solver_max_iter": mpc_cfg.get("nlp_solver_max_iter", 20),
         }
         self.T  = self.params["horizon"]
         self.nx = model.nx
         self.nu = model.nu
         self._build_solver()
+        self._initialized = False
 
     def _build_solver(self):
         p = self.params
@@ -134,8 +119,10 @@ class PusherSliderNMPC:
         ocp.cost.cost_type   = "LINEAR_LS"
         ocp.cost.cost_type_e = "LINEAR_LS"
 
-        Vx = np.zeros((ny, self.nx)); Vx[:self.nx, :] = np.eye(self.nx)
-        Vu = np.zeros((ny, self.nu)); Vu[self.nx:, :] = np.eye(self.nu)
+        Vx = np.zeros((ny, self.nx))
+        Vx[:self.nx, :] = np.eye(self.nx)
+        Vu = np.zeros((ny, self.nu))
+        Vu[self.nx:, :] = np.eye(self.nu)
         ocp.cost.Vx   = Vx
         ocp.cost.Vu   = Vu
         ocp.cost.Vx_e = np.eye(ny_e)
@@ -152,7 +139,6 @@ class PusherSliderNMPC:
         ocp.constraints.ubu   = np.array([p["v_n_max"],  p["v_t_max"]])
         ocp.constraints.idxbu = np.array([0, 1])
 
-        # p_y bounded by face half-length (slider_half_y for -x face, tangent is y_body)
         half_face = p["slider_half_y"]
         ocp.constraints.lbx   = np.array([-half_face])
         ocp.constraints.ubx   = np.array([ half_face])
@@ -160,21 +146,21 @@ class PusherSliderNMPC:
 
         ocp.constraints.x0 = np.zeros(self.nx)
 
-        ocp.solver_options.integrator_type  = "ERK"
-        ocp.solver_options.num_stages       = 4
-        ocp.solver_options.num_steps        = 1
-        ocp.solver_options.nlp_solver_type  = "SQP_RTI"
-        ocp.solver_options.qp_solver        = "PARTIAL_CONDENSING_HPIPM"
-        ocp.solver_options.qp_solver_cond_N = self.T // 4
-        ocp.solver_options.hessian_approx   = "GAUSS_NEWTON"
-        ocp.solver_options.print_level      = 0
+        ocp.solver_options.integrator_type     = "ERK"
+        ocp.solver_options.num_stages          = 4
+        ocp.solver_options.num_steps           = 1
+        ocp.solver_options.nlp_solver_type     = "SQP"
+        ocp.solver_options.nlp_solver_max_iter = p["nlp_solver_max_iter"]
+        ocp.solver_options.qp_solver           = "PARTIAL_CONDENSING_HPIPM"
+        ocp.solver_options.qp_solver_cond_N    = self.T // 4
+        ocp.solver_options.hessian_approx      = "GAUSS_NEWTON"
+        ocp.solver_options.print_level         = 0
 
         self._solver = AcadosOcpSolver(ocp, json_file="pusher_slider_ocp.json")
         self._Q_nom  = Q_mat.copy()
         self._R_mat  = R_mat.copy()
 
-    def solve(self, x0: np.ndarray, x_ref: np.ndarray) -> np.ndarray:
-        """Solve the OCP and return the first control action."""
+    def solve(self, x0, x_ref):
         self._solver.set(0, "lbx", x0)
         self._solver.set(0, "ubx", x0)
 
@@ -182,23 +168,49 @@ class PusherSliderNMPC:
             self._solver.cost_set(t, "yref", np.concatenate([x_ref[t], np.zeros(self.nu)]))
         self._solver.cost_set(self.T, "yref", x_ref[self.T])
 
-        status = self._solver.solve()
-        if status not in (0, 2):
-            print(f"[NMPC] acados status {status}")
+        if self._initialized:
+            for t in range(self.T - 1):
+                self._solver.set(t, "x", self._solver.get(t + 1, "x"))
+                self._solver.set(t, "u", self._solver.get(t + 1, "u"))
+            self._solver.set(self.T - 1, "u", self._solver.get(self.T - 2, "u"))
+            self._solver.set(self.T, "x", self._solver.get(self.T - 1, "x"))
 
-        return self._solver.get(0, "u")
+        status = self._solver.solve()
+        self._initialized = True
+        return self._solver.get(0, "u"), status
+
+    def reset(self):
+        self._initialized = False
+
+    @staticmethod
+    def wrap_to_pi(angle):
+        return (angle + np.pi) % (2 * np.pi) - np.pi
 
     @staticmethod
     def normalize_goal_theta(current_theta: float, goal_theta: float) -> float:
-        """Snap goal_theta to nearest equivalent orientation mod pi/2 for a rectangle."""
         candidates = [goal_theta + k * (np.pi / 2) for k in range(-2, 3)]
-        deltas = [(c - current_theta + np.pi) % (2 * np.pi) - np.pi for c in candidates]
+        deltas = [PusherSliderNMPC.wrap_to_pi(c - current_theta) for c in candidates]
         best = min(zip(deltas, candidates), key=lambda x: abs(x[0]))
         return best[1]
 
     @staticmethod
-    def make_linear_reference(x_start, x_goal, T):
-        """Linearly interpolate from x_start to x_goal over T+1 steps."""
-        delta = x_goal - x_start
-        delta[2] = (delta[2] + np.pi) % (2 * np.pi) - np.pi
-        return x_start + np.outer(np.linspace(0, 1, T + 1), delta)
+    def make_linear_path(x_start, x_goal, n_points):
+        ref = np.zeros((n_points, 4), dtype=float)
+        alpha = np.linspace(0.0, 1.0, n_points)
+        delta_theta = PusherSliderNMPC.wrap_to_pi(x_goal[2] - x_start[2])
+
+        ref[:, 0] = x_start[0] + alpha * (x_goal[0] - x_start[0])
+        ref[:, 1] = x_start[1] + alpha * (x_goal[1] - x_start[1])
+        ref[:, 2] = x_start[2] + alpha * delta_theta
+        ref[:, 2] = np.array([PusherSliderNMPC.wrap_to_pi(v) for v in ref[:, 2]])
+        ref[:, 3] = x_start[3] + alpha * (x_goal[3] - x_start[3])
+        return ref
+
+    @staticmethod
+    def sample_reference_window(path, start_idx, horizon):
+        n = path.shape[0]
+        out = np.zeros((horizon + 1, path.shape[1]), dtype=float)
+        for i in range(horizon + 1):
+            idx = min(start_idx + i, n - 1)
+            out[i] = path[idx]
+        return out

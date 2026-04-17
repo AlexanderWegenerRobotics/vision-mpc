@@ -21,7 +21,7 @@ workspace:
 
 # Pusher on -x_body face, pushing slider in +x_world direction
 slider_start:
-  xy: [0.5, 0.0]
+  xy: [0.5, 0.05]
   theta: 0.0
 
 goal:
@@ -33,10 +33,10 @@ goal_theta_tol: 0.087
 
 mpc:
   variant: "BASELINE"
-  horizon: 40
-  dt: 0.05
-  Q: [30.0, 30.0, 10.0, 0.5]
-  R: [10.0, 10.0]
+  horizon: 60
+  dt: 0.005
+  Q: [30.0, 30.0, 10.0, 1]
+  R: [1.0, 20.0]
   Q_terminal_scale: 20.0
   v_n_max: 0.05
   v_t_max: 0.05
@@ -44,3 +44,4 @@ mpc:
   mu_ground: 0.3
   slider_mass: 0.1
   v_n_min: 0.0
+  nlp_solver_max_iter: 20
