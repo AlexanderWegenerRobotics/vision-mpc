@@ -34,9 +34,9 @@ goal_theta_tol: 0.087   # ~5 degrees
 
 mpc:
   variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
-  horizon: 20
+  horizon: 50
   dt: 0.05
-  Q: [50.0, 50.0, 5.0, 0.1]
+  Q: [50.0, 50.0, 50.0, 1.0e-4]
   R: [1.0, 1.0]
   Q_terminal_scale: 10.0
   v_n_max: 0.5
@@ -49,4 +49,5 @@ mpc:
   r_obs: 0.0
   r_margin: 0.05
   q_obs: null
-  v_n_min: 0.05
+  mass: 0.1
+  nlp_solver_max_iter: 500
