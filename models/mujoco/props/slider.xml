@@ -3,15 +3,14 @@
 
   <asset>
     <material name="box_mat" rgba="0.2 0.6 0.85 1" specular="0.4" shininess="0.2"/>
-
-    <texture name="tag_0_tex" type="2d" file="tags/tag41_12_00000.png"/>
-    <texture name="tag_1_tex" type="2d" file="tags/tag41_12_00001.png"/>
-    <texture name="tag_2_tex" type="2d" file="tags/tag41_12_00002.png"/>
-    <texture name="tag_3_tex" type="2d" file="tags/tag41_12_00003.png"/>
-    <texture name="tag_4_tex" type="2d" file="tags/tag41_12_00004.png"/>
-    <texture name="tag_5_tex" type="2d" file="tags/tag41_12_00005.png"/>
-    <texture name="tag_6_tex" type="2d" file="tags/tag41_12_00006.png"/>
-    <texture name="tag_7_tex" type="2d" file="tags/tag41_12_00007.png"/>
+    <texture name="tag_0_tex" type="2d" file="tags/tag36_11_00000.png"/>
+    <texture name="tag_1_tex" type="2d" file="tags/tag36_11_00001.png"/>
+    <texture name="tag_2_tex" type="2d" file="tags/tag36_11_00002.png"/>
+    <texture name="tag_3_tex" type="2d" file="tags/tag36_11_00003.png"/>
+    <texture name="tag_4_tex" type="2d" file="tags/tag36_11_00004.png"/>
+    <texture name="tag_5_tex" type="2d" file="tags/tag36_11_00005.png"/>
+    <texture name="tag_6_tex" type="2d" file="tags/tag36_11_00006.png"/>
+    <texture name="tag_7_tex" type="2d" file="tags/tag36_11_00007.png"/>
 
     <material name="tag_0_mat" texture="tag_0_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
     <material name="tag_1_mat" texture="tag_1_tex" specular="0" shininess="0" rgba="1 1 1 1"/>

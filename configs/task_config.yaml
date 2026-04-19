@@ -17,7 +17,7 @@ surface_height_world: 0.425
 q_init: [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
 
 scenario:
-  mode: "random"           # "fixed" | "random"
+  mode: "fixed"           # "fixed" | "random"
   seed: null              # integer to fix the rng, null to use system entropy
   min_distance: 0.15      # minimum xy distance between start and goal (m)
   workspace:
@@ -52,3 +52,20 @@ mpc:
   mu_ground: 0.3
   slider_mass: 0.3
   nlp_solver_max_iter: 70
+
+vision:
+  cam_name: eye_in_hand
+  marker_size: 0.031
+
+  T_ee_cam:
+    pos: [0.0393, -0.0392, 0.043]
+    euler_xyz: [0.0, 0.0, -2.356]
+
+  marker:
+    0: {pos: [-0.028, -0.028,  0.0301], rot: [0.0, 0.0, 3.14159]}
+    1: {pos: [ 0.028, -0.028,  0.0301], rot: [0.0, 0.0, 3.14159]}
+    2: {pos: [-0.028,  0.028,  0.0301], rot: [0.0, 0.0, 3.14159]}
+    3: {pos: [ 0.028,  0.028,  0.0301], rot: [0.0, 0.0, 3.14159]}
+    4: {pos: [ 0.0,    0.0501, 0.0   ], rot: [ 1.5708, 0.0,    3.14159]}
+    5: {pos: [-0.0501, 0.0,    0.0   ], rot: [ 3.14159, -1.5708, 0.0  ]}
+    6: {pos: [ 0.0501, 0.0,    0.0   ], rot: [-3.14159,  1.5708, 0.0  ]}

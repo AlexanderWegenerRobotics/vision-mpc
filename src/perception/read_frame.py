@@ -1,6 +1,13 @@
 from simcore import RobotSystem, load_yaml
 import cv2
 import numpy as np
+# <camera name="eye_in_hand" pos="0 0.0555 0.043" euler="3.1416 0 3.1416" fovy="60"/>
+'''
+<body name="realsense_mount" pos="0 0 0.107" euler="0 0 -2.356">
+                          <geom name="realsense_mount_geom" type="mesh" mesh="camera" group="2" contype="0" conaffinity="0" mass="0.05" rgba="0.35 0.35 0.35 1"/>
+                          <camera name="eye_in_hand" pos="0 0 0" euler="3.1416 0 0" fovy="60"/>
+                      </body>
+'''
 
 def main():
     config = load_yaml("configs/global_config.yaml")

@@ -15,7 +15,7 @@ render_cameras:
     enabled: True
     width: 1280
     height: 720
-    fovy: 45
+    fovy: 60
   
   - name: workspace_overview
     attachment: False
@@ -66,19 +66,19 @@ objects:
       position: [0.5, -0.05, 0.425]
       orientation: [0.9763, 0, 0, 0.2165]
   
-  - name: target
-    type: visual
-    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
-    pose:
-      position: [0.75, 0.2, 0.44]
-      orientation: [0.9239, 0, 0, 0.3827]
+  #- name: target
+  #  type: visual
+  #  model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
+  #  pose:
+  #    position: [0.75, 0.2, 0.44]
+  #    orientation: [0.9239, 0, 0, 0.3827]
 
-  - name: slider_frame
-    type: visual
-    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
-    pose:
-      position: [0.5, 0.0, 0.44]
-      orientation: [1, 0, 0, 0]
+  #- name: slider_frame
+  #  type: visual
+  #  model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
+  #  pose:
+  #    position: [0.5, 0.0, 0.44]
+   #   orientation: [1, 0, 0, 0]
 
   - name: vel_arrow
     type: visual
