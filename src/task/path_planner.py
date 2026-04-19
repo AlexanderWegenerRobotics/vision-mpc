@@ -33,16 +33,20 @@ class StraightLinePlanner(PathPlanner):
     # profile if the distance is too short to reach v_max. Position and theta
     # interpolate at the same normalized progress s(t) in [0, 1] so orientation
     # slows into the goal alongside position.
+    # symmetry: rotational symmetry of the slider. For a square use pi/2; for
+    # a generic shape use 2*pi (no symmetry). The planner picks the equivalent
+    # goal orientation that requires the smallest rotation from start.
 
-    def __init__(self, v_max: float = 0.05, a_max: float = 0.10):
-        self.v_max = float(v_max)
-        self.a_max = float(a_max)
+    def __init__(self, v_max: float = 0.05, a_max: float = 0.10, symmetry: float = 2 * np.pi):
+        self.v_max    = float(v_max)
+        self.a_max    = float(a_max)
+        self.symmetry = float(symmetry)
 
     def plan(self, start: np.ndarray, goal: np.ndarray, n_steps: int, dt: float) -> np.ndarray:
         # n_steps is ignored: the trapezoidal profile determines how many steps
         # the path needs. Returned reference always has length n_profile+1.
         start_xy, goal_xy = start[:2], goal[:2]
-        start_th, goal_th = start[2], self._unwrap_goal_theta(start[2], goal[2])
+        start_th, goal_th = start[2], self._nearest_goal_theta(start[2], goal[2], self.symmetry)
 
         distance = float(np.linalg.norm(goal_xy - start_xy))
         if distance < 1e-9:
@@ -101,10 +105,24 @@ class StraightLinePlanner(PathPlanner):
         return d_of_t / distance
 
     @staticmethod
-    def _unwrap_goal_theta(start_th: float, goal_th: float) -> float:
-        # Choose the representative of goal_th that is closest to start_th.
-        diff = (goal_th - start_th + np.pi) % (2 * np.pi) - np.pi
-        return start_th + diff
+    def _nearest_goal_theta(start_th: float, goal_th: float, symmetry: float) -> float:
+        # Among all orientations equivalent to goal_th under rotational symmetry
+        # (i.e. goal_th + k*symmetry for integer k), return the one requiring the
+        # smallest rotation from start_th. The returned value is within pi of
+        # start_th so linear interpolation produces the minimal-rotation path.
+        if symmetry >= 2 * np.pi - 1e-9:
+            diff = (goal_th - start_th + np.pi) % (2 * np.pi) - np.pi
+            return start_th + diff
+
+        # Map goal to its "canonical" representative in [0, symmetry), then enumerate
+        # equivalents around start_th and pick the one with smallest |diff|.
+        g_canon    = goal_th - symmetry * np.floor(goal_th / symmetry)
+        n_wraps    = int(np.ceil(2 * np.pi / symmetry)) + 2
+        base       = start_th - np.pi
+        k0         = int(np.floor((base - g_canon) / symmetry))
+        candidates = [g_canon + (k0 + k) * symmetry for k in range(n_wraps)]
+        diffs      = [abs(c - start_th) for c in candidates]
+        return candidates[int(np.argmin(diffs))]
 
 
 class CircularPlanner(PathPlanner):

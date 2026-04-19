@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-
+from pathlib import Path
+import time, csv
 
 def wxyz_to_xyzw(q):
     return q[[1, 2, 3, 0]]
@@ -8,6 +9,34 @@ def wxyz_to_xyzw(q):
 
 def xyzw_to_wxyz(q):
     return np.array([q[3], q[0], q[1], q[2]])
+
+
+def sample_scenario(config: dict, rng: np.random.Generator):
+    # Reject-samples a start/goal pair within the workspace with a minimum
+    # xy distance between them. Returns (start_xy, start_theta, goal_xy, goal_theta).
+    sc     = config["scenario"]
+    ws     = sc["workspace"]
+    d_min  = float(sc["min_distance"])
+    x_lim  = ws["x"]
+    y_lim  = ws["y"]
+    th_lim = ws["theta"]
+
+    for _ in range(1000):
+        start_xy    = rng.uniform([x_lim[0], y_lim[0]], [x_lim[1], y_lim[1]])
+        start_theta = rng.uniform(th_lim[0], th_lim[1])
+        goal_xy     = rng.uniform([x_lim[0], y_lim[0]], [x_lim[1], y_lim[1]])
+        goal_theta  = rng.uniform(th_lim[0], th_lim[1])
+        if np.linalg.norm(goal_xy - start_xy) >= d_min:
+            return start_xy, start_theta, goal_xy, goal_theta
+    raise RuntimeError(f"Could not sample start/goal with min_distance={d_min} after 1000 tries.")
+
+
+def load_fixed_scenario(config: dict):
+    sc = config["scenario"]
+    return (np.array(sc["start"]["xy"], dtype=float),
+            float(sc["start"]["theta"]),
+            np.array(sc["goal"]["xy"],  dtype=float),
+            float(sc["goal"]["theta"]))
 
 
 def update_slider_frame(system, config, x_slider):
@@ -46,3 +75,63 @@ def update_vel_arrow(system, ee_pose, ee_vel_world, z_contact):
     # Offset origin to the base of the arrow so it grows outward from the EE.
     pos += vel_dir * half_len
     system.sim.reset_object_pose("vel_arrow", pos, xyzw_to_wxyz(quat_xyzw))
+
+class EpisodeMetrics:
+    """Accumulates per-step data during an episode and computes summary statistics."""
+
+    def __init__(self, variant: str, start_xy, start_theta, goal_xy, goal_theta):
+        self.variant       = variant
+        self.start_xy      = np.array(start_xy)
+        self.start_theta   = float(start_theta)
+        self.goal_xy       = np.array(goal_xy)
+        self.goal_theta    = float(goal_theta)
+        self._t0           = time.time()
+        self._xy_errors    = []
+        self._solver_fails = 0
+        self._n_solves     = 0
+
+    def record_step(self, x_slider: np.ndarray, ref_xy: np.ndarray, solver_status: int):
+        self._xy_errors.append(float(np.linalg.norm(x_slider[:2] - ref_xy)))
+        self._n_solves     += 1
+        self._solver_fails += int(solver_status != 0)
+
+    def summarise(self, x_slider_final: np.ndarray, success: bool) -> dict:
+        pos_err   = float(np.linalg.norm(x_slider_final[:2] - self.goal_xy))
+        theta_err = float(abs((x_slider_final[2] - self.goal_theta + np.pi) % (2 * np.pi) - np.pi))
+        errors    = np.array(self._xy_errors)
+        return {
+            "variant":           self.variant,
+            "success":           int(success),
+            "duration_s":        round(time.time() - self._t0, 3),
+            "path_rms_mm":       round(float(np.sqrt(np.mean(errors**2))) * 1000, 3) if len(errors) else 0.0,
+            "path_max_mm":       round(float(errors.max()) * 1000, 3) if len(errors) else 0.0,
+            "final_pos_mm":      round(pos_err * 1000, 3),
+            "final_theta_deg":   round(np.degrees(theta_err), 3),
+            "solver_fail_rate":  round(self._solver_fails / max(self._n_solves, 1), 4),
+            "start_x":           round(float(self.start_xy[0]), 4),
+            "start_y":           round(float(self.start_xy[1]), 4),
+            "start_theta":       round(self.start_theta, 4),
+            "goal_x":            round(float(self.goal_xy[0]), 4),
+            "goal_y":            round(float(self.goal_xy[1]), 4),
+            "goal_theta":        round(self.goal_theta, 4),
+        }
+
+
+_CSV_FIELDS = [
+    "variant", "success", "duration_s",
+    "path_rms_mm", "path_max_mm",
+    "final_pos_mm", "final_theta_deg",
+    "solver_fail_rate",
+    "start_x", "start_y", "start_theta",
+    "goal_x",  "goal_y",  "goal_theta",
+]
+
+
+def append_result(row: dict, csv_path: str = "results.csv"):
+    path   = Path(csv_path)
+    is_new = not path.exists()
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
+        if is_new:
+            writer.writeheader()
+        writer.writerow({k: row[k] for k in _CSV_FIELDS})

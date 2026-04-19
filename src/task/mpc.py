@@ -65,9 +65,16 @@ class PusherSliderModel:
         gt = ( mu*c2 - p_x*py + mu*p_x**2) / (c2 + py**2 - mu*p_x*py)
         gb = (-mu*c2 - p_x*py - mu*p_x**2) / (c2 + py**2 + mu*p_x*py)
 
+        #vc_n = self.v_n
+        #vc_t = ca.if_else(self.v_t > gt * self.v_n, self.v_n * gt, self.v_t)
+        #vc_t = ca.if_else(self.v_t < gb * self.v_n, self.v_n * gb, vc_t)
+
+        beta = 800.0  # sharpness parameter
+        w_upper = 0.5 * (1 + ca.tanh(beta * (self.v_t - gt * self.v_n)))
+        w_lower = 0.5 * (1 + ca.tanh(beta * (gb * self.v_n - self.v_t)))
+        w_stick = 1 - w_upper - w_lower
         vc_n = self.v_n
-        vc_t = ca.if_else(self.v_t > gt * self.v_n, self.v_n * gt, self.v_t)
-        vc_t = ca.if_else(self.v_t < gb * self.v_n, self.v_n * gb, vc_t)
+        vc_t = w_stick * self.v_t + w_upper * (gt * self.v_n) + w_lower * (gb * self.v_n)
 
         denom    = c2 + p_x**2 + py**2
         xdot_b   = ((c2 + p_x**2) * vc_n + p_x * py * vc_t) / denom

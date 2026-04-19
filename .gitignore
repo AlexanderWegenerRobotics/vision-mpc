@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 pusher_slider_ocp.json
 *.png
+*.csv
 
 # Data and logs
 log/

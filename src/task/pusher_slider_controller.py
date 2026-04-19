@@ -70,7 +70,9 @@ class PusherSliderController:
             time.sleep(self.mpc_dt)
 
     def _run_approach(self):
-        # Pick face, tell MPC about it, move EE above target contact point, descend onto face.
+        # Pick face, tell MPC about it, move EE above contact point, descend, then
+        # seat the pusher inward along the face normal to remove the standoff gap
+        # so the first MPC step is actually in contact with the slider.
         x_slider = self._get_slider_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
@@ -84,6 +86,12 @@ class PusherSliderController:
 
         self._move_to(p_start, p_mid,     max_speed=0.2)
         self._move_to(p_mid,   ee_target, max_speed=0.1)
+
+        # Seat against the face: move inward along the face normal by (standoff + overshoot)
+        # so the pusher lightly presses on the slider.
+        seated_world = self._seated_contact_point_world(x_slider, self._contact_face)
+        seated_ee    = self._tip_to_ee(seated_world)
+        self._move_to(ee_target, seated_ee, max_speed=0.02)
 
         self._plan_path(x_slider)
         self._tip_ref_xy = self._get_pusher_tip()[:2].copy()
@@ -131,6 +139,10 @@ class PusherSliderController:
         grace_steps = int(5.0 / self.mpc_dt)
         if self._step_idx >= len(self._path_ref) + grace_steps:
             print(f"[fail] plan ended {grace_steps} steps ago, pos_err={pos_err*1000:.1f}mm  theta_err={np.degrees(theta_err):.1f}deg")
+            return Phase.FAILED
+    
+        if np.linalg.norm(x_slider[:2] - self._tip_ref_xy) > 0.2:
+            print(f"[fail]: Pusher left slider")
             return Phase.FAILED
 
         return Phase.PUSHING
@@ -196,6 +208,22 @@ class PusherSliderController:
                         Face.POS_Y: np.array([ 0.0,  (b + r + margin)]),
                         Face.POS_X: np.array([ (a + r + margin),  0.0]),
                         Face.NEG_Y: np.array([ 0.0, -(b + r + margin)])}[face]
+        c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
+        R = np.array([[c, -s], [s, c]])
+        p2d = x_slider[:2] + R @ offsets_body
+        return np.array([p2d[0], p2d[1], self.z_contact])
+
+    def _seated_contact_point_world(self, x_slider, face):
+        # Where the pusher tip should end up to be in light contact: half-width + radius
+        # minus a small overshoot so we intentionally press into the slider face.
+        a = self.config["slider_half_x"]
+        b = self.config["slider_half_y"]
+        r = self.config["pusher_radius"]
+        overshoot = self.config.get("pusher_seat_depth", 0.02)
+        offsets_body = {Face.NEG_X: np.array([-(a + r - overshoot),  0.0]),
+                        Face.POS_Y: np.array([ 0.0,  (b + r - overshoot)]),
+                        Face.POS_X: np.array([ (a + r - overshoot),  0.0]),
+                        Face.NEG_Y: np.array([ 0.0, -(b + r - overshoot)])}[face]
         c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
         R = np.array([[c, -s], [s, c]])
         p2d = x_slider[:2] + R @ offsets_body
