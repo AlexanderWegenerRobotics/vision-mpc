@@ -6,7 +6,8 @@ from scipy.spatial.transform import Rotation
 from src.task.trajectory import TrajectoryPlanner
 from src.task.mpc import PusherSliderModel, PusherSliderNMPC, Face
 from src.task.path_planner import StraightLinePlanner, choose_face
-from src.task.utils import update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz
+from src.task.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz, 
+                            EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario)
 from simcore.common.pose import Pose
 
 
@@ -29,6 +30,7 @@ class PusherSliderController:
         self.ee_quat_ref   = np.array([0, 1, 0, 0])
         self.sim_dt        = self.system.get_timestep()
         self.mpc_dt        = config["mpc"]["dt"]
+        self.timeout       = config["timeout"]
 
         self.start_xy    = np.array(config["scenario"]["start"]["xy"], dtype=float)
         self.start_theta = float(config["scenario"]["start"]["theta"])
@@ -46,7 +48,9 @@ class PusherSliderController:
         self._step_idx   = 0
         self._contact_face = None
         self._tip_ref_xy = None
-
+        self._metrics      = None
+        self._rng        = np.random.default_rng()
+        
     def loop(self):
         for _ in range(self.config.get("iterations", 1)):
             self.run()
@@ -63,9 +67,17 @@ class PusherSliderController:
             elif self.phase == Phase.PUSHING:
                 self.phase = self._run_pushing()
 
+            if (time.time() - t0) > self.timeout:
+                print("[fail]: System stoped due to timeout")
+                self.phase = Phase.FAILED
+
             if self.phase in (Phase.DONE, Phase.FAILED):
                 self.running = False
+                success = self.phase == Phase.DONE
                 print(f"Phase {self.phase.name} after {time.time() - t0:.2f}s")
+
+                row = self._metrics.summarise(self._get_slider_state(), success)
+                append_result(row, csv_path=self.config.get("results_csv", "results.csv"))
 
             time.sleep(self.mpc_dt)
 
@@ -131,7 +143,7 @@ class PusherSliderController:
 
         pos_err   = np.linalg.norm(x_slider[:2] - self.goal_xy)
         theta_err = abs((x_slider[2] - self.goal_theta + np.pi) % (2 * np.pi) - np.pi)
-        if pos_err < self.config["goal_pos_tol"]:# and theta_err < self.config["goal_theta_tol"]:
+        if pos_err < self.config["goal_pos_tol"] and theta_err < self.config["goal_theta_tol"]:
             return Phase.DONE
 
         # Grace period: after the plan ends, the window holds at the goal reference.
@@ -268,6 +280,20 @@ class PusherSliderController:
         self._tip_ref_xy   = None
         self._nmpc.reset()
         self.system.clear_trail("ee_trail")
+        update_vel_arrow(self.system, Pose(position=np.zeros(3), quaternion=np.array([0,0,0,1])), np.ones(3), 0.0)
+
+        if self.config["scenario"].get("mode", "fixed") == "random":
+            self.start_xy, self.start_theta, self.goal_xy, self.goal_theta = \
+                sample_scenario(self.config, self._rng)
+        else:
+            self.start_xy, self.start_theta, self.goal_xy, self.goal_theta = \
+                load_fixed_scenario(self.config)
+
+        self._metrics = EpisodeMetrics(
+            variant=self.config["mpc"]["variant"],
+            start_xy=self.start_xy, start_theta=self.start_theta,
+            goal_xy=self.goal_xy,   goal_theta=self.goal_theta,
+        )
 
         slider_z    = self.config["surface_height_world"] + self.config["slider_half_z"]
         slider_pos  = np.array([self.start_xy[0], self.start_xy[1], slider_z])
