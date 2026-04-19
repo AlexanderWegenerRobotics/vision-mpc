@@ -1,6 +1,6 @@
 from simcore import RobotSystem, Pose, load_yaml
 import threading
-from src.task.pusher_slider_controller import PusherSliderController
+from src.pusher_slider_controller import PusherSliderController
 
 def main():
     config = load_yaml("configs/global_config.yaml")

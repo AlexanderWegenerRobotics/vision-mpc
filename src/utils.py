@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from pathlib import Path
 import time, csv
+import cv2
 
 def wxyz_to_xyzw(q):
     return q[[1, 2, 3, 0]]
@@ -75,6 +76,36 @@ def update_vel_arrow(system, ee_pose, ee_vel_world, z_contact):
     # Offset origin to the base of the arrow so it grows outward from the EE.
     pos += vel_dir * half_len
     system.sim.reset_object_pose("vel_arrow", pos, xyzw_to_wxyz(quat_xyzw))
+
+def rvec_tvec_to_T(rvec, tvec):
+    R, _ = cv2.Rodrigues(rvec)
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = tvec.flatten()
+    return T
+
+def marker_obj_points(marker_size):
+    s = marker_size / 2
+    return np.array([
+        [-s,  s, 0],
+        [ s,  s, 0],
+        [ s, -s, 0],
+        [-s, -s, 0],
+    ], dtype=np.float32)
+
+def make_T(R, t):
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = t
+    return T
+
+def inv_T(T):
+    R, t = T[:3, :3], T[:3, 3]
+    T_inv = np.eye(4)
+    T_inv[:3, :3] = R.T
+    T_inv[:3, 3] = -R.T @ t
+    return T_inv
+
 
 class EpisodeMetrics:
     """Accumulates per-step data during an episode and computes summary statistics."""

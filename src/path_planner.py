@@ -1,6 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
-
+from src.mpc import Face
 
 class PathPlanner(ABC):
     # Emits a reference trajectory of shape [N+1, 4] with columns
@@ -148,9 +148,6 @@ class CircularPlanner(PathPlanner):
         ref[:, 2] = angles + sign * np.pi / 2
         ref[:, 3] = 0.0
         return ref
-
-
-from src.task.mpc import Face
 
 def choose_face(slider_xy: np.ndarray, slider_theta: float, goal_xy: np.ndarray) -> Face:
     # Picks the face whose outward normal is most opposite to the push direction,
