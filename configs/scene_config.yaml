@@ -12,9 +12,10 @@ display:
 render_cameras:
   - name: eye_in_hand
     attachment: arm
-    enabled: False
+    enabled: True
     width: 1280
     height: 720
+    fovy: 45
   
   - name: workspace_overview
     attachment: False
@@ -60,7 +61,7 @@ objects:
 
   - name: box
     type: visual
-    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/box.xml
+    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/slider.xml
     pose:
       position: [0.5, -0.05, 0.425]
       orientation: [0.9763, 0, 0, 0.2165]
@@ -97,13 +98,13 @@ cameras:
 visualizations:
   trails:
     - name: "ee_trail"
-      enabled: true
+      enabled: false
       n_points: 200
       color: [0.2, 0.6, 1.0, 0.8]
       radius: 0.005
       hidden_pos: [0.0, 0.0, -1.0]
     - name: "slider_trail"
-      enabled: true
+      enabled: false
       n_points: 200
       color: [1.0, 0.3, 0.3, 0.8]
       radius: 0.005

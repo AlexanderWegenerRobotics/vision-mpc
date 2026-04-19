@@ -1,0 +1,103 @@
+<mujoco model="push_box">
+  <compiler angle="radian" autolimits="true"/>
+
+  <asset>
+    <material name="box_mat" rgba="0.2 0.6 0.85 1" specular="0.4" shininess="0.2"/>
+
+    <texture name="tag_0_tex" type="2d" file="tags/tag41_12_00000.png"/>
+    <texture name="tag_1_tex" type="2d" file="tags/tag41_12_00001.png"/>
+    <texture name="tag_2_tex" type="2d" file="tags/tag41_12_00002.png"/>
+    <texture name="tag_3_tex" type="2d" file="tags/tag41_12_00003.png"/>
+    <texture name="tag_4_tex" type="2d" file="tags/tag41_12_00004.png"/>
+    <texture name="tag_5_tex" type="2d" file="tags/tag41_12_00005.png"/>
+    <texture name="tag_6_tex" type="2d" file="tags/tag41_12_00006.png"/>
+    <texture name="tag_7_tex" type="2d" file="tags/tag41_12_00007.png"/>
+
+    <material name="tag_0_mat" texture="tag_0_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_1_mat" texture="tag_1_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_2_mat" texture="tag_2_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_3_mat" texture="tag_3_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_4_mat" texture="tag_4_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_5_mat" texture="tag_5_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_6_mat" texture="tag_6_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+    <material name="tag_7_mat" texture="tag_7_tex" specular="0" shininess="0" rgba="1 1 1 1"/>
+  </asset>
+
+  <worldbody>
+    <body name="box" pos="0 0 0">
+      <freejoint name="box_joint"/>
+
+      <geom name="box_geom"
+            type="box"
+            size="0.05 0.05 0.03"
+            mass="0.3"
+            material="box_mat"
+            condim="6"
+            friction="0.3 0.005 0.001"
+            solimp="0.95 0.99 0.001"
+            solref="0.02 1.0"/>
+
+      <site name="box_center" pos="0 0 0" size="0.003" rgba="1 0 0 1"/>
+
+      <geom name="tag_top_0"
+            type="box"
+            pos="-0.028 -0.028 0.0301"
+            size="0.02 0.02 0.0001"
+            material="tag_0_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_top_1"
+            type="box"
+            pos="0.028 -0.028 0.0301"
+            size="0.02 0.02 0.0001"
+            material="tag_1_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_top_2"
+            type="box"
+            pos="-0.028 0.028 0.0301"
+            size="0.02 0.02 0.0001"
+            material="tag_2_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_top_3"
+            type="box"
+            pos="0.028 0.028 0.0301"
+            size="0.02 0.02 0.0001"
+            material="tag_3_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_side_py"
+            type="box"
+            pos="0.000 0.0501 0.000"
+            euler="-1.5708 0 0"
+            size="0.02 0.02 0.0001"
+            material="tag_4_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_side_nx"
+            type="box"
+            pos="-0.0501 0.000 0.000"
+            euler="0 1.5708 0"
+            size="0.02 0.02 0.0001"
+            material="tag_5_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_side_ny"
+            type="box"
+            pos="0.000 -0.0501 0.000"
+            euler="1.5708 0 0"
+            size="0.02 0.02 0.0001"
+            material="tag_6_mat"
+            contype="0" conaffinity="0" mass="0"/>
+
+      <geom name="tag_side_px"
+            type="box"
+            pos="0.0501 0.000 0.000"
+            euler="0 -1.5708 0"
+            size="0.02 0.02 0.0001"
+            material="tag_7_mat"
+            contype="0" conaffinity="0" mass="0"/>
+    </body>
+  </worldbody>
+</mujoco>
