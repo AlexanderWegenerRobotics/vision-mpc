@@ -24,11 +24,17 @@ class Face(Enum):
     POS_X = 2   # pusher on +x_S face,            n_hat = -x_hat_S
     NEG_Y = 3   # pusher on -y_S face,            n_hat = +y_hat_S
 
-# Rotation from slider body frame to canonical frame (where active face is -x_S).
-# Equivalent to rotating the slider by -face_angle around its own z-axis.
+# Rotation that takes real body axes into canonical body axes (where the active
+# face is -x_S). For each face, canonical +x_S should point in the direction the
+# slider should translate under "push":
+#   NEG_X (pusher on real -x): canonical +x = real +x,  alpha = 0
+#   POS_Y (pusher on real +y): canonical +x = real -y,  alpha = -pi/2
+#   POS_X (pusher on real +x): canonical +x = real -x,  alpha = +pi
+#   NEG_Y (pusher on real -y): canonical +x = real +y,  alpha = +pi/2
+# theta_canonical = theta_real + alpha.
 # Keyed by enum .value (int) to avoid identity mismatches when Face is imported
 # from a module loaded twice (e.g. mpc.py as __main__ and as `import mpc`).
-_FACE_ANGLES = {0: 0.0, 1: np.pi/2, 2: np.pi, 3: -np.pi/2}
+_FACE_ANGLES = {0: 0.0, 1: -np.pi/2, 2: np.pi, 3: np.pi/2}
 
 
 class PusherSliderModel:
@@ -164,7 +170,7 @@ class PusherSliderNMPC:
         ocp.solver_options.integrator_type     = "ERK"
         ocp.solver_options.num_stages          = 4
         ocp.solver_options.num_steps           = 1
-        ocp.solver_options.nlp_solver_type     = "SQP"
+        ocp.solver_options.nlp_solver_type     = "SQP_RTI"
         ocp.solver_options.nlp_solver_max_iter = p["nlp_solver_max_iter"]
         ocp.solver_options.qp_solver           = "PARTIAL_CONDENSING_HPIPM"
         ocp.solver_options.qp_solver_cond_N    = max(1, self.T // 4)
@@ -241,5 +247,8 @@ if __name__ == "__main__":
 
     mpc.set_face(Face.POS_Y)
 
-    from tests.sim_tracking import validate_sim_tracking
-    validate_sim_tracking(mpc=mpc, model=model)
+    #from tests.sim_tracking import validate_sim_tracking
+    #validate_sim_tracking(mpc=mpc, model=model)
+
+    from tests.test_path_tracking import validate_path_tracking
+    validate_path_tracking(mpc=mpc, model=model)

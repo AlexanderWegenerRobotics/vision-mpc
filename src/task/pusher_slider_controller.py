@@ -4,7 +4,9 @@ import time
 from scipy.spatial.transform import Rotation
 
 from src.task.trajectory import TrajectoryPlanner
-from src.task.mpc import PusherSliderModel, PusherSliderNMPC
+from src.task.mpc import PusherSliderModel, PusherSliderNMPC, Face
+from src.task.path_planner import StraightLinePlanner, choose_face
+from src.task.utils import update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz
 from simcore.common.pose import Pose
 
 
@@ -14,268 +16,245 @@ class Phase(Enum):
     DONE     = auto()
     FAILED   = auto()
 
-def rotation_body_to_world(theta: float) -> np.ndarray:
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c, -s],
-                     [s,  c]])
-
-def rotation_world_to_body(theta: float) -> np.ndarray:
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[ c, s],
-                     [-s, c]])
-
 
 class PusherSliderController:
     def __init__(self, system=None, config=None):
-        self.phase       = Phase.APPROACH
-        self.config      = config
-        self.system      = system
-        self.running     = False
-        self.trajectory  = TrajectoryPlanner()
-        self.slider_name = config["slider_name"]
-        self.device_name = config["arm_name"]
+        self.config        = config
+        self.system        = system
+        self.slider_name   = config["slider_name"]
+        self.device_name   = config["arm_name"]
         self.pusher_length = config["pusher_length"]
-        self.z_goal      = config["surface_height_world"] + config["pusher_clearance"]
-        self.q_init      = config["q_init"]
-        self.dt          = self.system.get_timestep()
-        self.ee_quat_ref = np.array([0, 1, 0, 0])
-        self._rng        = np.random.default_rng()
-        self.goal_pos    = None
-        self.goal_theta  = None
+        self.z_contact     = config["surface_height_world"] + config["pusher_clearance"]
+        self.q_init        = config["q_init"]
+        self.ee_quat_ref   = np.array([0, 1, 0, 0])
+        self.sim_dt        = self.system.get_timestep()
+        self.mpc_dt        = config["mpc"]["dt"]
 
-        # State set by run_approach, consumed by run_pushing
-        self.contact_face = None
+        self.start_xy    = np.array(config["scenario"]["start"]["xy"], dtype=float)
+        self.start_theta = float(config["scenario"]["start"]["theta"])
+        self.goal_xy     = np.array(config["scenario"]["goal"]["xy"], dtype=float)
+        self.goal_theta  = float(config["scenario"]["goal"]["theta"])
 
-        # init mpc
         self._ps_model = PusherSliderModel(self.config)
-        self._nmpc = PusherSliderNMPC(self._ps_model, self.config)
+        self._nmpc     = PusherSliderNMPC(self._ps_model, self.config)
+        self._planner  = StraightLinePlanner(v_max=config["planner"]["v_max"], a_max=config["planner"]["a_max"])
+        self._trajectory = TrajectoryPlanner()
 
-        self.body_normals  = np.array([[ 0, -1], [ 0,  1], [-1,  0], [ 1,  0]], dtype=float)
-        self.body_tangents = np.array([[-1,  0], [ 1,  0], [ 0, -1], [ 0,  1]], dtype=float)
-
-    # ------------------------------------------------------------------ #
-    #  Main loop                                                           #
-    # ------------------------------------------------------------------ #
+        self.phase       = Phase.APPROACH
+        self.running     = False
+        self._path_ref   = None
+        self._step_idx   = 0
+        self._contact_face = None
+        self._tip_ref_xy = None
 
     def loop(self):
-        iter = self.config.get("iterations", 10)
-        for _ in range(iter):
+        for _ in range(self.config.get("iterations", 1)):
             self.run()
 
     def run(self):
+        # One episode: reset -> approach -> push until DONE/FAILED.
         self.reset()
         time.sleep(0.1)
+        t0 = time.time()
 
-        start_time = time.time()
         while self.running:
-            match self.phase:
-                case Phase.APPROACH:
-                    self.phase = self.run_approach()
-                case Phase.PUSHING:
-                    self.phase = self.run_pushing()
+            if self.phase == Phase.APPROACH:
+                self.phase = self._run_approach()
+            elif self.phase == Phase.PUSHING:
+                self.phase = self._run_pushing()
 
             if self.phase in (Phase.DONE, Phase.FAILED):
                 self.running = False
-                print(f"Stopping after {time.time() - start_time:.3f}s")
+                print(f"Phase {self.phase.name} after {time.time() - t0:.2f}s")
 
-            time.sleep(self.dt)
+            time.sleep(self.mpc_dt)
 
-    # ------------------------------------------------------------------ #
-    #  Phase handlers                                                      #
-    # ------------------------------------------------------------------ #
-
-    def run_approach(self):
+    def _run_approach(self):
+        # Pick face, tell MPC about it, move EE above target contact point, descend onto face.
         x_slider = self._get_slider_state()
-        self.contact_face = self._select_contact_face(x_slider, self.goal_pos)
-        contact_point = self._get_contact_point_world(x_slider, self.contact_face)
-        ee_pos_target = self._tip_target_to_ee_target(contact_point)
+        self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
+        self._nmpc.set_face(self._contact_face)
 
-        p_start = self._get_ee_pose()
-        z_1 = ee_pos_target[2] + np.abs(ee_pos_target[2] - p_start.position[2]) / 2
-        p_mid = np.concatenate([ee_pos_target[:2], [z_1]])
+        contact_world = self._contact_point_world(x_slider, self._contact_face)
+        ee_target     = self._tip_to_ee(contact_world)
 
-        self._execute_segment(p_start.position, self.ee_quat_ref, p_mid, self.ee_quat_ref, 0.2)
-        self._execute_segment(p_mid, self.ee_quat_ref, ee_pos_target, self.ee_quat_ref, 0.1)
+        p_start = self._get_ee_pose().position
+        z_mid   = ee_target[2] + abs(ee_target[2] - p_start[2]) / 2
+        p_mid   = np.array([ee_target[0], ee_target[1], z_mid])
+
+        self._move_to(p_start, p_mid,     max_speed=0.2)
+        self._move_to(p_mid,   ee_target, max_speed=0.1)
+
+        self._plan_path(x_slider)
+        self._tip_ref_xy = self._get_pusher_tip()[:2].copy()
+        self.system.set_controller_params(self.device_name, {"K_cart": [1000, 1000, 600, 160, 160, 160]})
 
         return Phase.PUSHING
 
-    def run_pushing(self) -> Phase:
+    def _run_pushing(self):
         x_slider = self._get_slider_state()
-        self._update_slider_frame(x_slider)
-        py = self._compute_py(x_slider, self.contact_face)
-        x0_mpc = np.array([x_slider[0], x_slider[1], x_slider[2], py])
-        effective_goal_theta = PusherSliderNMPC._normalize_goal_theta(x_slider[2], self.goal_theta)
-        x_goal_mpc = np.array([self.goal_pos[0], self.goal_pos[1], effective_goal_theta, 0.0])
-        x_ref = PusherSliderNMPC.make_linear_reference(x0_mpc, x_goal_mpc, self._nmpc.T)
-        u_opt = self._nmpc.solve(x0_mpc, x_ref)
-        ee_vel_world = self._contact_vel_to_ee_vel(u_opt, x_slider, py, self.contact_face)
-        self._update_vel_arrow(ee_vel_world) 
+        update_slider_frame(self.system, self.config, x_slider)
 
-        ee_pose_cmd = self._get_ee_pose()
-        ee_pose_cmd.quaternion = self.ee_quat_ref
-        ee_pose_cmd.position = self._tip_target_to_ee_target(np.array([ee_pose_cmd.position[0], ee_pose_cmd.position[1], self.z_goal]))
-        self.system.set_target(self.device_name,{"x": ee_pose_cmd, "xd": np.concatenate([ee_vel_world, np.zeros(3)])})
-        pos_err   = np.linalg.norm(x_slider[:2] - self.goal_pos)
-        theta_err = abs(x_slider[2] - self.goal_theta)
-        if pos_err < self.config.get("goal_pos_tol", 0.01) and theta_err < self.config.get("goal_theta_tol", 0.1):
+        p_y   = self._compute_py(x_slider, self._contact_face)
+        p_y   = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
+        x0    = np.array([x_slider[0], x_slider[1], x_slider[2], p_y])
+
+        ref_win = self._planner.window(self._path_ref, self._step_idx, self._nmpc.T)
+
+        u_opt, status = self._nmpc.solve(x0, ref_win)
+        if status != 0:
+            print(f"[warn] solver status {status} at step {self._step_idx}")
+
+        # Convert canonical (v_n, v_t) into world-frame pusher velocity.
+        ee_vel_world = self._canonical_vel_to_world(u_opt, x_slider[2], self._contact_face)
+
+        # Integrate the commanded velocity to a position target for the impedance controller.
+        self._tip_ref_xy = self._tip_ref_xy + ee_vel_world[:2] * self.mpc_dt
+        tip_ref_world   = np.array([self._tip_ref_xy[0], self._tip_ref_xy[1], self.z_contact])
+        ee_ref_pose     = Pose(position=self._tip_to_ee(tip_ref_world), quaternion=self.ee_quat_ref)
+
+        self.system.set_target(self.device_name, {
+            "x":  ee_ref_pose,
+            "xd": np.concatenate([ee_vel_world, np.zeros(3)]),
+        })
+
+        update_vel_arrow(self.system, self._get_ee_pose(), ee_vel_world, self.z_contact)
+        self._step_idx += 1
+
+        pos_err   = np.linalg.norm(x_slider[:2] - self.goal_xy)
+        theta_err = abs((x_slider[2] - self.goal_theta + np.pi) % (2 * np.pi) - np.pi)
+        if pos_err < self.config["goal_pos_tol"]:# and theta_err < self.config["goal_theta_tol"]:
             return Phase.DONE
 
+        # Grace period: after the plan ends, the window holds at the goal reference.
+        # Let the controller settle for up to `grace_steps` more steps before giving up.
+        grace_steps = int(5.0 / self.mpc_dt)
+        if self._step_idx >= len(self._path_ref) + grace_steps:
+            print(f"[fail] plan ended {grace_steps} steps ago, pos_err={pos_err*1000:.1f}mm  theta_err={np.degrees(theta_err):.1f}deg")
+            return Phase.FAILED
+
         return Phase.PUSHING
 
-    # ------------------------------------------------------------------ #
-    #  Helpers                                                         #
-    # ------------------------------------------------------------------ #
+    def _plan_path(self, x_slider):
+        # Plan the full reference once, visualize as a trail in the sim.
+        # StraightLinePlanner ignores n_steps and sizes the plan from its own profile.
+        start = np.array([x_slider[0], x_slider[1], x_slider[2], 0.0])
+        goal  = np.array([self.goal_xy[0], self.goal_xy[1], self.goal_theta, 0.0])
 
-    def _compute_py(self, x_slider: np.ndarray, face: int) -> float:
-        tip_world = self._get_pusher_tip_world()
+        self._path_ref = self._planner.plan(start, goal, n_steps=0, dt=self.mpc_dt)
+        self._step_idx = 0
+
+        self.system.clear_trail("ee_trail")
+        for ref_point in self._path_ref:
+            self.system.set_trail("ee_trail", np.array([ref_point[0], ref_point[1], self.z_contact]))
+
+    def _compute_py(self, x_slider, face):
+        # p_y is position along canonical +y_S axis, expressed in real body frame.
+        # Canonical +y_S = real +y rotated by +alpha. So p_y = component of d_body
+        # along the rotated unit vector.
+        tip_world = self._get_pusher_tip()
         d_world   = tip_world[:2] - x_slider[:2]
-        theta     = x_slider[2]
-        d_body = rotation_world_to_body(theta) @ d_world
-        # Faces 0,1: normal along body-y, tangent is body-x -> p_y = d_body[0]
-        # Faces 2,3: normal along body-x, tangent is body-y -> p_y = d_body[1]
-        return float(d_body[0] if face in (0, 1) else d_body[1])
+        c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
+        d_body = np.array([ c * d_world[0] + s * d_world[1],
+                           -s * d_world[0] + c * d_world[1]])
+        # Canonical +y_S in real body frame for each face:
+        #   NEG_X: (0, +1)  -> p_y = +d_body[1]
+        #   POS_Y: (+1, 0)  -> p_y = +d_body[0]
+        #   POS_X: (0, -1)  -> p_y = -d_body[1]
+        #   NEG_Y: (-1, 0)  -> p_y = -d_body[0]
+        py_pick = {Face.NEG_X:  d_body[1],
+                   Face.POS_Y:  d_body[0],
+                   Face.POS_X: -d_body[1],
+                   Face.NEG_Y: -d_body[0]}
+        return float(py_pick[face])
 
-    def _contact_vel_to_ee_vel(self, u, x_slider, py, face):
-        theta = x_slider[2]
-        n_body, t_body = self.body_normals[face], self.body_tangents[face]
-        pusher_vel_body = -u[0] * n_body + u[1] * t_body
-        pusher_vel_world = rotation_body_to_world(theta) @ pusher_vel_body
-        return np.array([pusher_vel_world[0], pusher_vel_world[1], 0.0])
+    def _canonical_vel_to_world(self, u, theta, face):
+        # MPC returns u = (v_n, v_t) in canonical frame where pusher is on -x_S_canonical.
+        # Canonical axes = real body axes rotated by +alpha, where alpha is the
+        # face angle (same signs as mpc.py _FACE_ANGLES). To get real body-frame
+        # velocity from canonical-frame velocity, apply R(+alpha) to u.
+        face_angle = {Face.NEG_X: 0.0,
+                      Face.POS_Y: -np.pi / 2,
+                      Face.POS_X:  np.pi,
+                      Face.NEG_Y:  np.pi / 2}[face]
+        ca, sa = np.cos(face_angle), np.sin(face_angle)
+        u_body = np.array([ca * u[0] - sa * u[1],
+                           sa * u[0] + ca * u[1]])
+        c, s = np.cos(theta), np.sin(theta)
+        v_world = np.array([c * u_body[0] - s * u_body[1],
+                            s * u_body[0] + c * u_body[1]])
+        return np.array([v_world[0], v_world[1], 0.0])
 
-    def _get_slider_state(self) -> tuple[np.ndarray, np.ndarray]:
-        slider  = self.system.get_object_states()[self.slider_name]
-        pos_s   = slider["pos"][:2]
-        quat_s  = slider["quat"][[1, 2, 3, 0]]
-        theta_s = Rotation.from_quat(quat_s).as_euler("zyx")[0]
-        return np.array([pos_s[0], pos_s[1], theta_s])
-
-    def _select_contact_face(self, x_slider: np.ndarray, goal_pos: np.ndarray) -> int:
-        slider_pos   = x_slider[:2]
-        d_world = slider_pos - goal_pos
-        d_body = rotation_world_to_body(x_slider[2]) @ d_world
-        normals = np.array([[0, -1], [0, 1], [-1, 0], [1, 0]])
-
-        return int(np.argmax(normals @ d_body))
-
-    def _get_contact_point_world(self, x_slider: np.ndarray, face: int) -> np.ndarray:
-        a      = self.config.get("slider_half_x")
-        b      = self.config.get("slider_half_y")
-        r      = self.config.get("pusher_radius")
+    def _contact_point_world(self, x_slider, face):
+        # World-frame position where the pusher tip should sit to contact the chosen face.
+        a = self.config["slider_half_x"]
+        b = self.config["slider_half_y"]
+        r = self.config["pusher_radius"]
         margin = self.config.get("pusher_standoff", 0.005)
-        offsets_body = np.array([
-            [ 0.0, -(b + r + margin)],
-            [ 0.0,  (b + r + margin)],
-            [-(a + r + margin),  0.0],
-            [ (a + r + margin),  0.0],
-        ])
-        p2d = x_slider[:2] + rotation_body_to_world(x_slider[2]) @ offsets_body[face]
-        return np.array([p2d[0], p2d[1], self.z_goal])
+        # Pusher sits outside the face's outward normal, offset by (half-width + radius + margin).
+        offsets_body = {Face.NEG_X: np.array([-(a + r + margin),  0.0]),
+                        Face.POS_Y: np.array([ 0.0,  (b + r + margin)]),
+                        Face.POS_X: np.array([ (a + r + margin),  0.0]),
+                        Face.NEG_Y: np.array([ 0.0, -(b + r + margin)])}[face]
+        c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
+        R = np.array([[c, -s], [s, c]])
+        p2d = x_slider[:2] + R @ offsets_body
+        return np.array([p2d[0], p2d[1], self.z_contact])
 
-    def _execute_segment(self, p_start, q_start, p_end, q_end, max_speed) -> None:
-        self.trajectory.plan_with_speed(p_start, q_start, p_end, q_end, max_speed=max_speed)
-        while not self.trajectory.is_done():
-            step = self.trajectory.step(self.dt)
-            target_pose = Pose(position=step["pos"], quaternion=step["quat"])
-            self.system.set_target(self.device_name, {"x": target_pose, "xd": np.concatenate([step["vel"], step["omega"]])})
-            time.sleep(self.dt)
+    def _get_slider_state(self):
+        slider    = self.system.get_object_states()[self.slider_name]
+        pos       = slider["pos"][:2]
+        quat_xyzw = wxyz_to_xyzw(slider["quat"])
+        theta     = Rotation.from_quat(quat_xyzw).as_euler("zyx")[0]
+        return np.array([pos[0], pos[1], theta])
 
-    def _get_pusher_tip_world(self) -> np.ndarray:
-        ee_pose   = self._get_ee_pose()
-        R         = Rotation.from_quat(ee_pose.quaternion[[1, 2, 3, 0]]).as_matrix()
-        return ee_pose.position + R @ np.array([0.0, 0.0, self.pusher_length])
-    
     def _get_ee_pose(self):
         arm_state = self.system.get_state()[self.device_name]
         return self.system.ctrl[self.device_name].get_ee_pose_world(arm_state)
 
-    def _tip_target_to_ee_target(self, tip_target_world: np.ndarray) -> np.ndarray:
-        arm_state = self.system.get_state()[self.device_name]
-        ee_pose   = self.system.ctrl[self.device_name].get_ee_pose_world(arm_state)
-        R         = Rotation.from_quat(ee_pose.quaternion[[1, 2, 3, 0]]).as_matrix()
-        return tip_target_world - R @ np.array([0.0, 0.0, self.pusher_length])
+    def _get_pusher_tip(self):
+        ee_pose = self._get_ee_pose()
+        R = Rotation.from_quat(wxyz_to_xyzw(ee_pose.quaternion)).as_matrix()
+        return ee_pose.position + R @ np.array([0.0, 0.0, self.pusher_length])
+
+    def _tip_to_ee(self, tip_world):
+        ee_pose = self._get_ee_pose()
+        R = Rotation.from_quat(wxyz_to_xyzw(ee_pose.quaternion)).as_matrix()
+        return tip_world - R @ np.array([0.0, 0.0, self.pusher_length])
+
+    def _move_to(self, p_start, p_end, max_speed):
+        self._trajectory.plan_with_speed(p_start, self.ee_quat_ref, p_end, self.ee_quat_ref, max_speed=max_speed)
+        while not self._trajectory.is_done():
+            step = self._trajectory.step(self.sim_dt)
+            pose = Pose(position=step["pos"], quaternion=step["quat"])
+            vel  = np.concatenate([step["vel"], step["omega"]])
+            self.system.set_target(self.device_name, {"x": pose, "xd": vel})
+            time.sleep(self.sim_dt)
 
     def reset(self):
-        self.phase     = Phase.APPROACH
-        self.running   = True
-        self._sim_time = 0.0
-
-        ws             = self.config["workspace"]
-        x_lo, x_hi    = ws["x"]
-        y_lo, y_hi    = ws["y"]
-        d_min          = self.config["min_start_goal_dist"]
-
-        slider_xy    = self._rng.uniform([x_lo, y_lo], [x_hi, y_hi])
-        slider_theta = self._rng.uniform(*self.config["slider_init"]["theta_range"])
-
-        for _ in range(1000):
-            goal_xy = self._rng.uniform([x_lo, y_lo], [x_hi, y_hi])
-            if np.linalg.norm(goal_xy - slider_xy) >= d_min:
-                break
-        else:
-            raise RuntimeError("Could not sample valid goal within workspace constraints.")
-
-        goal_theta = self._rng.uniform(*self.config["goal"]["theta_range"])
+        self.phase         = Phase.APPROACH
+        self.running       = True
+        self._path_ref     = None
+        self._step_idx     = 0
+        self._contact_face = None
+        self._tip_ref_xy   = None
+        self._nmpc.reset()
+        self.system.clear_trail("ee_trail")
 
         slider_z    = self.config["surface_height_world"] + self.config["slider_half_z"]
-        slider_pos  = np.array([slider_xy[0], slider_xy[1], slider_z])
-        slider_quat = Rotation.from_euler("z", slider_theta).as_quat()
-        slider_quat = np.array([slider_quat[3], *slider_quat[:3]])
+        slider_pos  = np.array([self.start_xy[0], self.start_xy[1], slider_z])
+        slider_quat = xyzw_to_wxyz(Rotation.from_euler("z", self.start_theta).as_quat())
 
-        self.goal_pos   = goal_xy
-        self.goal_theta = goal_theta
+        goal_pos  = np.array([self.goal_xy[0], self.goal_xy[1], slider_z])
+        goal_quat = xyzw_to_wxyz(Rotation.from_euler("z", self.goal_theta).as_quat())
 
         self.system.sim.reset_device_state(self.device_name, self.q_init)
         self.system.sim.reset_object_pose(self.slider_name, slider_pos, slider_quat)
-
-        goal_pos      = np.array([goal_xy[0], goal_xy[1], slider_z])
-        goal_quat_xyzw = Rotation.from_euler("z", goal_theta).as_quat()
-        goal_quat_wxyz = np.array([goal_quat_xyzw[3], *goal_quat_xyzw[:3]])
-        self.system.sim.reset_object_pose("target", goal_pos, goal_quat_wxyz)
+        self.system.sim.reset_object_pose("target", goal_pos, goal_quat)
 
         ee_pose = self._get_ee_pose()
-        self.system.set_controller_mode("arm", "dynamic_impedance")
-        self.system.set_target("arm", {"x": Pose(position=ee_pose.position, quaternion=self.ee_quat_ref)})
+        self.system.set_controller_mode(self.device_name, "dynamic_impedance")
+        self.system.set_target(self.device_name, {"x": Pose(position=ee_pose.position, quaternion=self.ee_quat_ref)})
         self.system.sim.forward()
 
-        x_slider = self._get_slider_state()
-        self._update_slider_frame(x_slider)
-
-
-
-    def _update_slider_frame(self, x_slider: np.ndarray):
-        slider_z = self.config["surface_height_world"] + self.config["slider_half_z"]
-        pos = np.array([x_slider[0], x_slider[1], slider_z])
-        quat_xyzw = Rotation.from_euler("z", x_slider[2]).as_quat()
-        quat_wxyz = np.array([quat_xyzw[3], *quat_xyzw[:3]])
-        self.system.sim.reset_object_pose("slider_frame", pos, quat_wxyz)
-
-
-    def _update_vel_arrow(self, ee_vel_world: np.ndarray):
-        vel_2d = ee_vel_world[:2]
-        speed  = np.linalg.norm(vel_2d)
-        if speed < 1e-4:
-            return
-
-        half_len   = np.clip(speed * 1.0, 0.02, 0.2)
-        geom_id = self.system.sim.mj_model.geom("vel_arrow/vel_arrow_shaft").id
-        self.system.sim.mj_model.geom_size[geom_id] = [0.005, half_len, 0]
-
-        ee_pose = self._get_ee_pose()
-        pos = ee_pose.position.copy()
-        pos[2] = self.z_goal
-
-        vel_dir = np.array([vel_2d[0], vel_2d[1], 0.0]) / speed
-        z_axis  = np.array([0.0, 0.0, 1.0])
-        axis    = np.cross(z_axis, vel_dir)
-        angle   = np.arccos(np.clip(np.dot(z_axis, vel_dir), -1, 1))
-
-        if np.linalg.norm(axis) < 1e-6:
-            quat_xyzw = np.array([0, 0, 0, 1])
-        else:
-            axis      = axis / np.linalg.norm(axis)
-            quat_xyzw = np.array([*(axis * np.sin(angle / 2)), np.cos(angle / 2)])
-
-        quat_wxyz = np.array([quat_xyzw[3], *quat_xyzw[:3]])
-        # offset body origin to base of arrow
-        pos += vel_dir * half_len
-        self.system.sim.reset_object_pose("vel_arrow", pos, quat_wxyz)
+        update_slider_frame(self.system, self.config, self._get_slider_state())
