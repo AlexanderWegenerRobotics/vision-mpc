@@ -2,6 +2,7 @@ iterations: 10
 slider_name: "box"
 arm_name: "arm"
 timeout: 20.0
+log_dir: "log"
 
 pusher_length: 0.167
 pusher_radius: 0.016
@@ -54,6 +55,7 @@ mpc:
   nlp_solver_max_iter: 70
 
 vision:
+  f_estimation: 30.0
   cam_name: eye_in_hand
   marker_size: 0.031
 

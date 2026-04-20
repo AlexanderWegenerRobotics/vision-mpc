@@ -7,6 +7,7 @@ from src.trajectory import TrajectoryPlanner
 from src.mpc import PusherSliderModel, PusherSliderNMPC, Face
 from src.path_planner import StraightLinePlanner, choose_face
 from src.slider_observer import SliderObserver
+from src.logger import EpisodeLogger
 from src.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz,
                             EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario)
 from simcore.common.pose import Pose
@@ -38,24 +39,31 @@ class PusherSliderController:
         self.goal_xy     = np.array(config["scenario"]["goal"]["xy"], dtype=float)
         self.goal_theta  = float(config["scenario"]["goal"]["theta"])
 
-        self._ps_model = PusherSliderModel(self.config)
-        self._nmpc     = PusherSliderNMPC(self._ps_model, self.config)
-        self._planner  = StraightLinePlanner(v_max=config["planner"]["v_max"], a_max=config["planner"]["a_max"])
+        self._ps_model   = PusherSliderModel(self.config)
+        self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
+        self._planner    = StraightLinePlanner(v_max=config["planner"]["v_max"], a_max=config["planner"]["a_max"])
         self._trajectory = TrajectoryPlanner()
-        self._observer = SliderObserver(self.config, self.system)
+        self._observer   = SliderObserver(self.config, self.system)
+        self._logger     = EpisodeLogger(self.config)
 
-        self.phase       = Phase.APPROACH
-        self.running     = False
-        self._path_ref   = None
-        self._step_idx   = 0
+        self.phase         = Phase.APPROACH
+        self.running       = False
+        self._path_ref     = None
+        self._step_idx     = 0
+        self._episode_idx  = 0
         self._contact_face = None
-        self._tip_ref_xy = None
+        self._tip_ref_xy   = None
         self._metrics      = None
-        self._rng        = np.random.default_rng()
+        self._rng          = np.random.default_rng()
 
     def loop(self):
-        for _ in range(self.config.get("iterations", 1)):
-            self.run()
+        self._observer.start()
+        try:
+            for _ in range(self.config.get("iterations", 1)):
+                self.run()
+        finally:
+            self._observer.stop()
+            print("[observer] vision thread stopped")
 
     def run(self):
         self.reset()
@@ -77,14 +85,16 @@ class PusherSliderController:
                 success = self.phase == Phase.DONE
                 print(f"Phase {self.phase.name} after {time.time() - t0:.2f}s")
 
-                x_slider, _ = self._observer.get_state()
+                x_slider = self._observer._get_gt_state()
                 row = self._metrics.summarise(x_slider, success)
                 append_result(row, csv_path=self.config.get("results_csv", "results.csv"))
+                self._logger.save(success)
+                self._episode_idx += 1
 
             time.sleep(self.mpc_dt)
 
     def _run_approach(self):
-        x_slider, _ = self._observer.get_state()
+        x_slider = self._observer._get_gt_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
 
@@ -98,7 +108,7 @@ class PusherSliderController:
         self._move_to(p_start, p_mid,     max_speed=0.2)
         self._move_to(p_mid,   ee_target, max_speed=0.1)
 
-        x_slider, _ = self._observer.get_state()
+        x_slider = self._observer._get_gt_state()
         seated_world = self._seated_contact_point_world(x_slider, self._contact_face)
         seated_ee    = self._tip_to_ee(seated_world)
         self._move_to(ee_target, seated_ee, max_speed=0.02)
@@ -110,31 +120,53 @@ class PusherSliderController:
         return Phase.PUSHING
 
     def _run_pushing(self):
-        x_slider, cov = self._observer.get_state()
+        x_slider, cov, vis_x = self._observer.get_state()
+        gt_state             = self._observer._get_gt_state()
         update_slider_frame(self.system, self.config, x_slider)
 
-        p_y   = self._compute_py(x_slider, self._contact_face)
-        p_y   = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
-        x0    = np.array([x_slider[0], x_slider[1], x_slider[2], p_y])
+        p_y = self._compute_py(x_slider, self._contact_face)
+        p_y = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
+        x0  = np.array([x_slider[0], x_slider[1], x_slider[2], p_y])
 
         ref_win = self._planner.window(self._path_ref, self._step_idx, self._nmpc.T)
 
+        t_solve       = time.perf_counter()
         u_opt, status = self._nmpc.solve(x0, ref_win)
+        solve_time_ms = (time.perf_counter() - t_solve) * 1000.0
+
         if status != 0:
             print(f"[warn] solver status {status} at step {self._step_idx}")
 
         ee_vel_world = self._canonical_vel_to_world(u_opt, x_slider[2], self._contact_face)
 
         self._tip_ref_xy = self._tip_ref_xy + ee_vel_world[:2] * self.mpc_dt
-        tip_ref_world   = np.array([self._tip_ref_xy[0], self._tip_ref_xy[1], self.z_contact])
-        ee_ref_pose     = Pose(position=self._tip_to_ee(tip_ref_world), quaternion=self.ee_quat_ref)
+        tip_ref_world    = np.array([self._tip_ref_xy[0], self._tip_ref_xy[1], self.z_contact])
+        ee_ref_pose      = Pose(position=self._tip_to_ee(tip_ref_world), quaternion=self.ee_quat_ref)
 
         self.system.set_target(self.device_name, {
             "x":  ee_ref_pose,
             "xd": np.concatenate([ee_vel_world, np.zeros(3)]),
         })
 
-        update_vel_arrow(self.system, self._get_ee_pose(), ee_vel_world, self.z_contact)
+        ee_pose    = self._get_ee_pose()
+        pusher_tip = self._get_pusher_tip()
+        update_vel_arrow(self.system, ee_pose, ee_vel_world, self.z_contact)
+
+        self._logger.record(
+            gt_state      = gt_state,
+            obs_state     = x_slider,
+            vis_state     = vis_x,
+            obs_cov       = cov,
+            control       = u_opt,
+            ref_state     = ref_win[0],
+            p_y           = p_y,
+            solver_status = status,
+            solve_time_ms = solve_time_ms,
+            ee_pos        = ee_pose.position,
+            ee_vel        = ee_vel_world[:2],
+            pusher_tip    = pusher_tip[:2],
+        )
+
         self._step_idx += 1
 
         pos_err   = np.linalg.norm(x_slider[:2] - self.goal_xy)
@@ -190,31 +222,31 @@ class PusherSliderController:
         return np.array([v_world[0], v_world[1], 0.0])
 
     def _contact_point_world(self, x_slider, face):
-        a = self.config["slider_half_x"]
-        b = self.config["slider_half_y"]
-        r = self.config["pusher_radius"]
+        a      = self.config["slider_half_x"]
+        b      = self.config["slider_half_y"]
+        r      = self.config["pusher_radius"]
         margin = self.config.get("pusher_standoff", 0.005)
         offsets_body = {Face.NEG_X: np.array([-(a + r + margin),  0.0]),
                         Face.POS_Y: np.array([ 0.0,  (b + r + margin)]),
                         Face.POS_X: np.array([ (a + r + margin),  0.0]),
                         Face.NEG_Y: np.array([ 0.0, -(b + r + margin)])}[face]
         c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
-        R = np.array([[c, -s], [s, c]])
-        p2d = x_slider[:2] + R @ offsets_body
+        R    = np.array([[c, -s], [s, c]])
+        p2d  = x_slider[:2] + R @ offsets_body
         return np.array([p2d[0], p2d[1], self.z_contact])
 
     def _seated_contact_point_world(self, x_slider, face):
-        a = self.config["slider_half_x"]
-        b = self.config["slider_half_y"]
-        r = self.config["pusher_radius"]
+        a         = self.config["slider_half_x"]
+        b         = self.config["slider_half_y"]
+        r         = self.config["pusher_radius"]
         overshoot = self.config.get("pusher_seat_depth", 0.02)
         offsets_body = {Face.NEG_X: np.array([-(a + r - overshoot),  0.0]),
                         Face.POS_Y: np.array([ 0.0,  (b + r - overshoot)]),
                         Face.POS_X: np.array([ (a + r - overshoot),  0.0]),
                         Face.NEG_Y: np.array([ 0.0, -(b + r - overshoot)])}[face]
         c, s = np.cos(x_slider[2]), np.sin(x_slider[2])
-        R = np.array([[c, -s], [s, c]])
-        p2d = x_slider[:2] + R @ offsets_body
+        R    = np.array([[c, -s], [s, c]])
+        p2d  = x_slider[:2] + R @ offsets_body
         return np.array([p2d[0], p2d[1], self.z_contact])
 
     def _get_ee_pose(self):
@@ -280,5 +312,14 @@ class PusherSliderController:
         self.system.set_target(self.device_name, {"x": Pose(position=ee_pose.position, quaternion=self.ee_quat_ref)})
         self.system.sim.forward()
 
-        x_slider, _ = self._observer.get_state()
+        x_slider = self._observer._get_gt_state()
         update_slider_frame(self.system, self.config, x_slider)
+
+        self._logger.reset(
+            episode_idx = self._episode_idx,
+            start_xy    = self.start_xy,
+            start_theta = self.start_theta,
+            goal_xy     = self.goal_xy,
+            goal_theta  = self.goal_theta,
+            face        = str(self._contact_face),
+        )
