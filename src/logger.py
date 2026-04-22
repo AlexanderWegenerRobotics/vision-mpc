@@ -6,24 +6,19 @@ from pathlib import Path
 
 class EpisodeLogger:
     def __init__(self, config):
-        self.config  = config
-        self.log_dir = Path(config.get("log_dir", "logs"))
+        self.config   = config
+        self.log_dir  = Path(config.get("log_dir", "logs"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.variant = config["mpc"]["variant"]
-
-        max_steps = int(config["timeout"] / config["mpc"]["dt"]) + int(5.0 / config["mpc"]["dt"]) + 10
-
-        self._max_steps = max_steps
-        self._n         = 0
-        self._t0        = None
-        self._buf       = None
+        self.variant  = config["mpc"]["variant"]
+        self._max_steps = int(config["timeout"] / config["mpc"]["dt"]) + int(5.0 / config["mpc"]["dt"]) + 10
+        self._n    = 0
+        self._t0   = None
+        self._buf  = None
 
     def reset(self, episode_idx, start_xy, start_theta, goal_xy, goal_theta, face):
         self._episode_idx = episode_idx
         self._t0          = time.time()
         self._n           = 0
-        self._face        = face
-
         self._meta = {
             "variant":     self.variant,
             "face":        face,
@@ -38,7 +33,7 @@ class EpisodeLogger:
             "t":               np.zeros(N),
             "gt_state":        np.zeros((N, 3)),
             "obs_state":       np.zeros((N, 3)),
-            "vis_state":       np.zeros((N, 3)),
+            "vis_state":       np.full((N, 3), np.nan),
             "detection_valid": np.zeros(N, dtype=bool),
             "obs_cov":         np.zeros((N, 3, 3)),
             "control":         np.zeros((N, 2)),
@@ -56,11 +51,12 @@ class EpisodeLogger:
         if self._buf is None or self._n >= self._max_steps:
             return
         i = self._n
+        detected = vis_state is not None
         self._buf["t"][i]               = time.time() - self._t0
         self._buf["gt_state"][i]        = gt_state
         self._buf["obs_state"][i]       = obs_state
-        self._buf["detection_valid"][i] = vis_state is not None
-        self._buf["vis_state"][i]       = vis_state if vis_state is not None else np.zeros(3)
+        self._buf["detection_valid"][i] = detected
+        self._buf["vis_state"][i]       = vis_state if detected else np.full(3, np.nan)
         self._buf["obs_cov"][i]         = obs_cov
         self._buf["control"][i]         = control
         self._buf["ref_state"][i]       = ref_state
