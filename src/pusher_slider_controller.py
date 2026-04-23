@@ -126,6 +126,9 @@ class PusherSliderController:
         self._tip_ref_xy = self._get_pusher_tip()[:2].copy()
         self.system.set_controller_params(self.device_name, {"K_cart": [1000, 1000, 600, 160, 160, 160]})
 
+        ref_win  = self._planner.window(self._path_ref, 0, self._nmpc.T)
+        self._nmpc.reset(x0_world=x_slider, ref_world=ref_win)
+
         return Phase.PUSHING
 
     def _run_pushing(self):

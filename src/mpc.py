@@ -242,8 +242,24 @@ class PusherSliderNMPC:
         u_canonical = self._solver.get(0, "u")
         return u_canonical, status
 
-    def reset(self):
+    def reset(self, x0_world: np.ndarray = None, ref_world: np.ndarray = None):
         self._initialized = False
+        if x0_world is not None and ref_world is not None:
+            self._seed_warm_start(x0_world, ref_world)
+
+    def _seed_warm_start(self, x0_world: np.ndarray, ref_world: np.ndarray):
+        # Seed solver with linear interpolation from x0 toward reference trajectory.
+        x0_4d   = x0_world if len(x0_world) == 4 else np.append(x0_world, 0.0)
+        x0_can  = self.world_to_canonical(x0_4d)
+        ref_can = self.ref_world_to_canonical(ref_world)
+        u_init  = np.array([self.params["v_n_max"] * 0.1, 0.0])
+        for t in range(self.T + 1):
+            alpha = t / self.T
+            x_t   = (1 - alpha) * x0_can + alpha * ref_can[min(t, len(ref_can) - 1)]
+            self._solver.set(t, "x", x_t)
+        for t in range(self.T):
+            self._solver.set(t, "u", u_init)
+        self._initialized = True
 
 
 if __name__ == "__main__":
