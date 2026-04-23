@@ -5,66 +5,114 @@ from scipy.spatial.transform import Rotation
 from simcore import RobotSystem
 
 from src.pose_estimation import PoseEstimation
+from src.ekf import SliderEKF
 from src.utils import wxyz_to_xyzw
 
 
-
 class SliderObserver:
-    def __init__(self, config: dict, system: RobotSystem):
-        self.config = config
-        self.system = system
-        self.variant = config["mpc"]["variant"]
+    def __init__(self, config: dict, system: RobotSystem, model=None):
+        self.config      = config
+        self.system      = system
+        self.variant     = config["mpc"]["variant"]
         self.slider_name = config["slider_name"]
-        
-        self.estimator = PoseEstimation(config, system)
-        self.est_dt     = 1.0 / config.get("vision", {}).get("f_estimation", 30.0)
-        self.est_thread = threading.Thread(target=self._est_loop, daemon=True)
-        self.est_lock = threading.Lock()
-        self.running = False
 
-        self.xs_est = None
+        self.estimator = PoseEstimation(config, system)
+        self.est_dt    = 1.0 / config.get("vision", {}).get("f_estimation", 30.0)
+        self.prop_dt   = config["mpc"]["dt"]
+
+        self._ekf      = SliderEKF(model, config) if model is not None else None
+        self._py       = 0.0
+
+        self._est_lock  = threading.Lock()
+        self._ekf_lock  = threading.Lock()
+        self._new_meas  = False
+        self._pending_z = None
+
+        self.running     = False
+        self._est_thread = None
+        self._prop_thread = None
 
     def start(self):
         if self.running: return
-
         self.running = True
         print("Started observer")
-
-        if self.est_thread is None or not self.est_thread.is_alive():
-            self.est_thread = threading.Thread(target=self._est_loop, daemon=True)
-            self.est_thread.start()
+        self._est_thread  = threading.Thread(target=self._est_loop,  daemon=True)
+        self._prop_thread = threading.Thread(target=self._prop_loop, daemon=True)
+        self._est_thread.start()
+        self._prop_thread.start()
 
     def stop(self):
         self.running = False
 
-    def get_state(self):
+    def set_control(self, u: np.ndarray):
+        if self._ekf is None: return
+        with self._ekf_lock:
+            self._ekf.set_control(u)
+
+    def set_py(self, p_y: float):
+        with self._ekf_lock:
+            self._py = p_y
+
+    def get_state(self) -> np.ndarray:
         if self.variant == "BASELINE":
             return self.get_gt_state()
-        else:
-            return self.get_est_state()
+        return self.get_est_state()
 
-    def get_gt_state(self):
+    def get_gt_state(self) -> np.ndarray:
         slider    = self.system.get_object_states()[self.slider_name]
         pos       = slider["pos"][:2]
         quat_xyzw = wxyz_to_xyzw(slider["quat"])
         theta     = Rotation.from_quat(quat_xyzw).as_euler("zyx")[0]
         return np.array([pos[0], pos[1], theta])
 
-    def get_est_state(self):
-        with self.est_lock:
-            return None if self.xs_est is None else self.xs_est.copy()
+    def get_est_state(self) -> np.ndarray:
+        with self._ekf_lock:
+            return self._ekf.mean if self._ekf is not None else None
 
-    def reset(self):
-        self.xs_est = None
+    def get_covariance(self) -> np.ndarray:
+        with self._ekf_lock:
+            return self._ekf.covariance if self._ekf is not None else None
+
+    def reset(self, x0: np.ndarray = None):
+        with self._ekf_lock:
+            if self._ekf is not None:
+                self._ekf.reset(x0=x0)
+            self._py       = 0.0
+            self._pending_z = None
+
+    def _prop_loop(self):
+        # Propagate EKF belief at MPC rate; fuse pending vision measurement when available.
+        while self.running:
+            t0 = time.perf_counter()
+
+            with self._ekf_lock:
+                z = self._pending_z
+                self._pending_z = None
+                py = self._py
+
+            if self._ekf is not None:
+                with self._ekf_lock:
+                    if z is not None:
+                        if not self._ekf.initialised():
+                            self._ekf.reset(x0=z)
+                        else:
+                            self._ekf.update(z)
+                    self._ekf.predict(py)
+
+            sleep = self.prop_dt - (time.perf_counter() - t0)
+            if sleep > 0:
+                time.sleep(sleep)
 
     def _est_loop(self):
+        # Run vision estimation at camera rate; post measurements for the propagation loop.
         print(f"Trying to run estimation loop: {self.running}")
         while self.running:
             t0 = time.perf_counter()
-            x = self.estimator.get_pose_estimate()
+            z  = self.estimator.get_pose_estimate()
 
-            with self.est_lock:
-                self.xs_est = x
+            if z is not None:
+                with self._ekf_lock:
+                    self._pending_z = z
 
             sleep = self.est_dt - (time.perf_counter() - t0)
             if sleep > 0:

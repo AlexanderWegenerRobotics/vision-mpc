@@ -45,7 +45,7 @@ class PusherSliderController:
         self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
         self._planner    = StraightLinePlanner(v_max=config["planner"]["v_max"], a_max=config["planner"]["a_max"])
         self._trajectory = TrajectoryPlanner()
-        self._observer   = SliderObserver(self.config, self.system)
+        self._observer   = SliderObserver(self.config, self.system, self._ps_model)
         self._logger     = EpisodeLogger(self.config)
 
         self.phase        = Phase.APPROACH
@@ -142,6 +142,8 @@ class PusherSliderController:
         t_solve       = time.perf_counter()
         u_opt, status = self._nmpc.solve(x0, ref_win)
         solve_time_ms = (time.perf_counter() - t_solve) * 1000.0
+        self._observer.set_control(u_opt)
+        self._observer.set_py(p_y)
 
         if status != 0:
             print(f"[warn] solver status {status} at step {self._step_idx}")
@@ -163,12 +165,13 @@ class PusherSliderController:
 
         gt_state = self._observer.get_gt_state()
         est_state = self._observer.get_est_state()
+        obs_cov = self._observer.get_covariance()
 
         self._logger.record(
             gt_state      = gt_state,
             obs_state     = x_slider,
             vis_state     = est_state,
-            obs_cov       = np.zeros((3, 3)),
+            obs_cov       = obs_cov,
             control       = u_opt,
             ref_state     = ref_win[0],
             p_y           = p_y,
