@@ -95,28 +95,8 @@ class PusherSliderController:
 
             time.sleep(self.mpc_dt)
 
-    def _get_obs_state(self):
-        gt_state = self._observer.get_gt_state()
-        vis_x    = self._observer.get_estimate()
-
-        if self.variant == ControllerVariant.BASELINE:
-            return gt_state, gt_state, vis_x
-
-        if vis_x is None:
-            if self._last_obs_x is not None:
-                print("[warn] no detection, using last known state")
-                obs_x = self._last_obs_x
-            else:
-                print("[warn] no detection on first step, falling back to GT")
-                obs_x = gt_state
-        else:
-            obs_x = vis_x
-
-        self._last_obs_x = obs_x
-        return obs_x, gt_state, vis_x
-
     def _run_approach(self):
-        x_slider = self._observer.get_gt_state()
+        x_slider = self._observer.get_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
 
@@ -130,7 +110,7 @@ class PusherSliderController:
         self._move_to(p_start, p_mid,     max_speed=0.2)
         self._move_to(p_mid,   ee_target, max_speed=0.1)
 
-        x_slider     = self._observer.get_gt_state()
+        x_slider     = self._observer.get_state()
         seated_world = self._seated_contact_point_world(x_slider, self._contact_face)
         seated_ee    = self._tip_to_ee(seated_world)
         self._move_to(ee_target, seated_ee, max_speed=0.02)
@@ -142,7 +122,7 @@ class PusherSliderController:
         return Phase.PUSHING
 
     def _run_pushing(self):
-        x_slider, gt_state, vis_x = self._get_obs_state()
+        x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
 
         p_y = self._compute_py(x_slider, self._contact_face)
@@ -173,10 +153,13 @@ class PusherSliderController:
         pusher_tip = self._get_pusher_tip()
         update_vel_arrow(self.system, ee_pose, ee_vel_world, self.z_contact)
 
+        gt_state = self._observer.get_gt_state()
+        est_state = self._observer.get_est_state()
+
         self._logger.record(
             gt_state      = gt_state,
             obs_state     = x_slider,
-            vis_state     = vis_x,
+            vis_state     = est_state,
             obs_cov       = np.zeros((3, 3)),
             control       = u_opt,
             ref_state     = ref_win[0],
@@ -321,7 +304,7 @@ class PusherSliderController:
         self.system.set_target(self.device_name, {"x": Pose(position=ee_pose.position, quaternion=self.ee_quat_ref)})
         self.system.sim.forward()
 
-        x_slider = self._observer.get_gt_state()
+        x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
 
         self._logger.reset(

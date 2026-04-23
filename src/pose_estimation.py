@@ -35,11 +35,19 @@ class PoseEstimation:
             self.slider_corners[marker_id] = corners.astype(np.float32)
 
     def get_pose_estimate(self):
-        frame_bgr = self.system.get_camera_image("eye_in_hand", bgr=True)
-        arm_state = self.system.get_state()["arm"]
-        return self.estimate_from_frame(frame_bgr, arm_state)
+        frame_bgr = self.system.get_latest_camera_frame("eye_in_hand")
+        if frame_bgr is None:
+            return None
 
-    def estimate_from_frame(self, frame_bgr, arm_state):
+        arm_state = self.system.get_state()["arm"]
+        T_cam_slider = self.estimate_from_frame(frame_bgr)
+        if T_cam_slider is None:
+            return None
+
+        return self._transform_to_world(T_cam_slider, arm_state)
+
+    def estimate_from_frame(self, frame_bgr):
+        if frame_bgr is None: return
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = self.DETECTOR.detectMarkers(gray)
 
