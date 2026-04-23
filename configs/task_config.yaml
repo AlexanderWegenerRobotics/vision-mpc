@@ -41,7 +41,7 @@ planner:
   symmetry: 1.5707963267948966  # pi/2 for a square slider; 2*pi for no symmetry
 
 mpc:
-  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  variant: "CERTAINTY_EQUIV"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
   horizon: 200
   dt: 0.01
   Q: [50.0, 50.0, 50.0, 1.0e-4]

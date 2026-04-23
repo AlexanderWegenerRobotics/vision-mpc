@@ -68,14 +68,28 @@ class SliderEKF:
         S      = self._P + self.R
         
         # Mahalanobis gate — reject outlier measurements
-        mahal_sq = float(inn @ np.linalg.solve(S, inn))
-        if mahal_sq > self._gate_thresh:
+        #mahal_sq = float(inn @ np.linalg.solve(S, inn))
+        #if mahal_sq > self._gate_thresh:
+        #    return
+    
+        R_diag = np.diag(self.R)
+        if np.any(inn**2 > 25 * R_diag):  # 5-sigma per component
             return
         
         K          = self._P @ np.linalg.solve(S.T, np.eye(self.nx)).T
         self._x    = self._x + K @ inn
         self._x[2] = wrap_to_pi(self._x[2])
         self._P    = (np.eye(self.nx) - K) @ self._P
+
+    def _propagate_covariance(self, x0_can, u_traj, P0):
+        P = P0.copy()
+        Ps = [P]
+        for k in range(self.T):
+            u_k = u_traj[k] if u_traj is not None else np.zeros(2)
+            F   = np.array(self._F_fn(x0_can, 0.0, u_k))
+            P   = F @ P @ F.T + self.Q_ekf
+            Ps.append(P)
+        return Ps
 
     def initialised(self) -> bool:
         return self._x is not None

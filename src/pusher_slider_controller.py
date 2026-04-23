@@ -319,6 +319,9 @@ class PusherSliderController:
         x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
 
+        x0_ekf = np.array([self.start_xy[0], self.start_xy[1], self.start_theta])
+        self._observer.reset(x0=x0_ekf)
+
         self._logger.reset(
             episode_idx = self._episode_idx,
             start_xy    = self.start_xy,
