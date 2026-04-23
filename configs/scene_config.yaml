@@ -73,19 +73,19 @@ objects:
       position: [0.75, 0.2, 0.44]
       orientation: [0.9239, 0, 0, 0.3827]
 
-  - name: slider_frame
-    type: visual
-    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
-    pose:
-      position: [0.5, 0.0, 0.44]
-      orientation: [1, 0, 0, 0]
+  #- name: slider_frame
+  #  type: visual
+  #  model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/target_frame.xml
+  #  pose:
+  #    position: [0.5, 0.0, 0.44]
+  #    orientation: [1, 0, 0, 0]
 
-  - name: vel_arrow
-    type: visual
-    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/arrow.xml
-    pose:
-      position: [0.0, 0.0, 0.0]
-      orientation: [1, 0, 0, 0]
+  #- name: vel_arrow
+  #  type: visual
+  #  model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/arrow.xml
+  #  pose:
+  #    position: [0.0, 0.0, 0.0]
+  #    orientation: [1, 0, 0, 0]
 
 # Add and configure cameras such as overall viewpoint
 cameras:

@@ -9,7 +9,8 @@ from src.path_planner import StraightLinePlanner, choose_face
 from src.slider_observer import SliderObserver
 from src.logger import EpisodeLogger
 from src.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz,
-                       EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario)
+                       EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario,
+                       quat_wxyz_from_tool_yaw, wrap_to_pi)
 from simcore.common.pose import Pose
 
 
@@ -58,6 +59,8 @@ class PusherSliderController:
         self._metrics     = None
         self._rng         = np.random.default_rng()
 
+        self._ee_yaw_vis = None
+
     def loop(self):
         self._observer.start()
         try:
@@ -99,6 +102,7 @@ class PusherSliderController:
         x_slider = self._observer.get_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
+        self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
 
         contact_world = self._contact_point_world(x_slider, self._contact_face)
         ee_target     = self._tip_to_ee(contact_world)
@@ -115,6 +119,9 @@ class PusherSliderController:
         seated_ee    = self._tip_to_ee(seated_world)
         self._move_to(ee_target, seated_ee, max_speed=0.02)
 
+        x_slider = self._observer.get_state()
+        self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
+
         self._plan_path(x_slider)
         self._tip_ref_xy = self._get_pusher_tip()[:2].copy()
         self.system.set_controller_params(self.device_name, {"K_cart": [1000, 1000, 600, 160, 160, 160]})
@@ -124,6 +131,7 @@ class PusherSliderController:
     def _run_pushing(self):
         x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
+        self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
 
         p_y = self._compute_py(x_slider, self._contact_face)
         p_y = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
@@ -272,6 +280,7 @@ class PusherSliderController:
         self._contact_face = None
         self._tip_ref_xy   = None
         self._last_obs_x   = None
+        self._ee_yaw_vis = None
         self._nmpc.reset()
         self.system.clear_trail("ee_trail")
         update_vel_arrow(self.system, Pose(position=np.zeros(3), quaternion=np.array([0, 0, 0, 1])), np.ones(3), 0.0)
@@ -315,3 +324,40 @@ class PusherSliderController:
             goal_theta  = self.goal_theta,
             face        = str(self._contact_face),
         )
+
+    def _compute_visibility_quat(self, x_slider, face):
+        yaw_cam_offset = np.deg2rad(-45.0)
+        yaw_bias       = np.deg2rad(0.0)
+        yaw_alpha      = 0.08
+        yaw_rate_max   = np.deg2rad(25.0)
+        yaw_nominal    = 0.0
+        yaw_limit      = np.deg2rad(65.0)
+
+        theta = x_slider[2]
+
+        face_normal_body = {
+            Face.NEG_X: np.array([-1.0,  0.0]),
+            Face.POS_Y: np.array([ 0.0,  1.0]),
+            Face.POS_X: np.array([ 1.0,  0.0]),
+            Face.NEG_Y: np.array([ 0.0, -1.0]),
+        }[face]
+
+        c, s = np.cos(theta), np.sin(theta)
+        R_ws = np.array([[c, -s],
+                        [s,  c]])
+        n_world = R_ws @ face_normal_body
+        yaw_face_normal = np.arctan2(n_world[1], n_world[0])
+
+        yaw_des = wrap_to_pi(yaw_face_normal + yaw_cam_offset + yaw_bias + np.pi)
+        yaw_des = np.clip(wrap_to_pi(yaw_des - yaw_nominal), -yaw_limit, yaw_limit) + yaw_nominal
+        yaw_des = wrap_to_pi(yaw_des)
+
+        if self._ee_yaw_vis is None:
+            self._ee_yaw_vis = yaw_des
+        else:
+            yaw_err = wrap_to_pi(yaw_des - self._ee_yaw_vis)
+            yaw_step_max = yaw_rate_max * self.sim_dt
+            yaw_step = np.clip(yaw_alpha * yaw_err, -yaw_step_max, yaw_step_max)
+            self._ee_yaw_vis = wrap_to_pi(self._ee_yaw_vis + yaw_step)
+
+        return quat_wxyz_from_tool_yaw(self._ee_yaw_vis)

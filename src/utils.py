@@ -11,6 +11,14 @@ def wxyz_to_xyzw(q):
 def xyzw_to_wxyz(q):
     return np.array([q[3], q[0], q[1], q[2]])
 
+def wrap_to_pi(a):
+    return (a + np.pi) % (2 * np.pi) - np.pi
+
+def quat_wxyz_from_tool_yaw(yaw):
+    base_rot = Rotation.from_quat(wxyz_to_xyzw(np.array([0, 1, 0, 0])))
+    yaw_rot  = Rotation.from_euler("z", yaw)
+    quat_xyzw = (yaw_rot * base_rot).as_quat()
+    return xyzw_to_wxyz(quat_xyzw)
 
 def sample_scenario(config: dict, rng: np.random.Generator):
     # Reject-samples a start/goal pair within the workspace with a minimum
@@ -41,6 +49,7 @@ def load_fixed_scenario(config: dict):
 
 
 def update_slider_frame(system, config, x_slider):
+    return
     # Visualization: keeps the slider's coordinate-frame axes rendered at its current pose.
     slider_z  = config["surface_height_world"] + config["slider_half_z"]
     pos       = np.array([x_slider[0], x_slider[1], slider_z])
@@ -49,6 +58,7 @@ def update_slider_frame(system, config, x_slider):
 
 
 def update_vel_arrow(system, ee_pose, ee_vel_world, z_contact):
+    return
     # Visualization: renders the commanded EE velocity as an arrow in the scene.
     vel_2d = ee_vel_world[:2]
     speed  = np.linalg.norm(vel_2d)
