@@ -26,10 +26,10 @@ scenario:
     y: [-0.20, 0.20]      # symmetric lateral range, avoids side-reach singularity
     theta: [-0.4, 0.4]  # +-45 deg; wider is fine when symmetry=pi/2
   start:
-    xy: [0.6, 0.1]
+    xy: [0.6, -0.1]
     theta: 0.0
   goal:
-    xy: [0.5,  -0.1]
+    xy: [0.5,  0.1]
     theta: 0.2
 
 goal_pos_tol:   0.060       # 8cm
@@ -42,21 +42,22 @@ planner:
   theta_delay_frac: 0.5
 
 mpc:
-  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
-  horizon: 200
+  variant: "UNCERTAINTY_AWARE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  horizon: 100
   dt: 0.01
   Q: [30.0, 30.0, 30.0, 1.0e-4]
-  R: [5.0, 5.0]
+  R: [0.5, 2.0]
   Q_terminal_scale: 30.0
   v_n_max: 0.5
   v_t_max: 0.3
   mu_slider: 0.3
   mu_ground: 0.3
   slider_mass: 0.3
-  nlp_solver_max_iter: 70
+  nlp_solver_max_iter: 20
   ekf_Q: [5e-4, 5e-4, 5e-3]     # process noise
   ekf_R: [1e-4, 1e-4, 3e-4]   # measurement noise
   ekf_gate_thresh: 7.81
+  cc_beta: 1.645         # 95% one-sided
 
 vision:
   f_estimation: 60.0

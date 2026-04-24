@@ -65,10 +65,6 @@ class PusherSliderModel:
         gt = ( mu*c2 - p_x*py + mu*p_x**2) / (c2 + py**2 - mu*p_x*py)
         gb = (-mu*c2 - p_x*py - mu*p_x**2) / (c2 + py**2 + mu*p_x*py)
 
-        #vc_n = self.v_n
-        #vc_t = ca.if_else(self.v_t > gt * self.v_n, self.v_n * gt, self.v_t)
-        #vc_t = ca.if_else(self.v_t < gb * self.v_n, self.v_n * gb, vc_t)
-
         beta = 800.0  # sharpness parameter
         w_upper = 0.5 * (1 + ca.tanh(beta * (self.v_t - gt * self.v_n)))
         w_lower = 0.5 * (1 + ca.tanh(beta * (gb * self.v_n - self.v_t)))
@@ -106,6 +102,12 @@ class PusherSliderModel:
 
 
 class PusherSliderNMPC:
+    # Constrained state layout for chance-constraint tightening:
+    #   idxbx = [0, 1, 3]  -> x_S, y_S, p_y
+    #   theta is not box-constrained; keep-out bounds on x_S/y_S default to +-1e6
+    #   (effectively non-binding) until a scenario sets tighter values.
+    _CC_STATE_IDX = np.array([0, 1, 3], dtype=int)
+
     def __init__(self, model: PusherSliderModel, config: dict):
         self.model   = model
         mpc_cfg      = config["mpc"]
@@ -126,10 +128,16 @@ class PusherSliderNMPC:
         self.nx = model.nx
         self.nu = model.nu
         self._face = Face.NEG_X
+
+        self._cc_beta       = float(mpc_cfg.get("cc_beta", 1.645))
+        self._cc_min_half_y = float(mpc_cfg.get("cc_min_half_y", 0.01))
+        self._ekf_Q         = np.array(mpc_cfg["ekf_Q"], dtype=float)
+
+        self._lbx_nom = None
+        self._ubx_nom = None
         self._build_solver()
+        self._build_cc_jacobian()
         self._initialized = False
-        self._ekf_Q  = np.array(mpc_cfg["ekf_Q"], dtype=float)
-        self._F_fn   = None
 
     def _build_solver(self):
         p            = self.params
@@ -167,10 +175,14 @@ class PusherSliderNMPC:
         ocp.constraints.ubu   = np.array([p["v_n_max"],  p["v_t_max"]])
         ocp.constraints.idxbu = np.array([0, 1], dtype=int)
 
-        half_face = p["slider_half_y"]
-        ocp.constraints.lbx   = np.array([-half_face])
-        ocp.constraints.ubx   = np.array([ half_face])
-        ocp.constraints.idxbx = np.array([3], dtype=int)
+        # State box: [x_S, y_S, p_y]. x_S/y_S default to effectively unconstrained.
+        big = 1e6
+        half_y = p["slider_half_y"]
+        lbx = np.array([-big, -big, -half_y])
+        ubx = np.array([ big,  big,  half_y])
+        ocp.constraints.lbx   = lbx
+        ocp.constraints.ubx   = ubx
+        ocp.constraints.idxbx = self._CC_STATE_IDX.copy()
 
         ocp.constraints.lbx_0 = np.zeros(self.nx, dtype=float)
         ocp.constraints.ubx_0 = np.zeros(self.nx, dtype=float)
@@ -186,9 +198,20 @@ class PusherSliderNMPC:
         ocp.solver_options.hessian_approx      = "GAUSS_NEWTON"
         ocp.solver_options.print_level         = 0
 
-        self._solver = AcadosOcpSolver(ocp, json_file="pusher_slider_ocp.json")
-        self._Q_nom  = Q_mat.copy()
-        self._R_mat  = R_mat.copy()
+        self._solver  = AcadosOcpSolver(ocp, json_file="pusher_slider_ocp.json")
+        self._Q_nom   = Q_mat.copy()
+        self._R_mat   = R_mat.copy()
+        self._lbx_nom = lbx.copy()
+        self._ubx_nom = ubx.copy()
+
+    def _build_cc_jacobian(self):
+        # Discrete-time 4x4 Jacobian F = d(x + dt*f)/dx for covariance propagation.
+        dt     = self.params["dt"]
+        x_next = self.model.x_sym + dt * self.model.f_expr
+        F_expr = ca.jacobian(x_next, self.model.x_sym)
+        self._F_full_fn = ca.Function("F_full", [self.model.x_sym, self.model.u_sym], [F_expr])
+
+        self._Q3 = np.diag(self._ekf_Q)
 
     def set_face(self, face: Face):
         # Selects which slider face is in contact for this episode. MPC always
@@ -196,6 +219,13 @@ class PusherSliderNMPC:
         # used by world_to_canonical / canonical_to_world.
         self._face = face
         self._initialized = False
+
+    def set_state_keepout(self, lbx_world: np.ndarray, ubx_world: np.ndarray):
+        # Set nominal box bounds on [x_S, y_S, p_y] (world frame for xy).
+        # Use +-1e6 entries to leave a dimension effectively unconstrained.
+        self._lbx_nom = np.array(lbx_world, dtype=float).copy()
+        self._ubx_nom = np.array(ubx_world, dtype=float).copy()
+        self._reset_stage_constraints()
 
     def _face_angle(self) -> float:
         return _FACE_ANGLES[self._face.value]
@@ -232,6 +262,8 @@ class PusherSliderNMPC:
 
         if self.variant == ControllerVariant.UNCERTAINTY_AWARE and P is not None:
             self._apply_chance_constraints(x0_can, P)
+        else:
+            self._reset_stage_constraints()
 
         if self._initialized:
             for t in range(self.T - 1):
@@ -243,42 +275,40 @@ class PusherSliderNMPC:
         status = self._solver.solve()
         self._initialized = (status == 0)
         return self._solver.get(0, "u"), status
-    
+
     def _apply_chance_constraints(self, x0_can: np.ndarray, P_ekf: np.ndarray):
-        # Propagate covariance along horizon; tighten p_y bounds by induced sigma.
-        beta     = 1.645
-        half_y   = self.params["slider_half_y"]
-        half_x   = self.params["slider_half_x"]
-        min_half = 0.01
+        # Propagate 3x3 EKF covariance along horizon; tighten world-frame
+        # [x_S, y_S] box bounds by beta * sigma per stage. p_y stays at nominal.
+        beta = self._cc_beta
+        xy_slots = np.array([0, 1], dtype=int)
 
-        P4         = np.zeros((4, 4))
-        P4[:3, :3] = P_ekf
-        Q4         = np.diag(np.append(self._ekf_Q, 0.0))
-
-        F3 = np.array(self._F_fn(x0_can[:3], x0_can[3], np.zeros(self.nu)))
-        F4 = np.eye(4);  F4[:3, :3] = F3
-        P  = F4 @ P4 @ F4.T + Q4
+        P = P_ekf.copy()
+        F_xy = np.eye(4)
 
         for t in range(1, self.T):
-            sigma_py  = half_x * np.sqrt(max(P[2, 2], 0.0))
-            half_face = max(half_y - beta * sigma_py, min_half)
-            self._solver.constraints_set(t, "lbx", np.array([-half_face]))
-            self._solver.constraints_set(t, "ubx", np.array([ half_face]))
-
             x_t = self._solver.get(t, "x") if self._initialized else x0_can
-            u_t = self._solver.get(t, "u") if self._initialized else np.zeros(self.nu)
-            F3  = np.array(self._F_fn(x_t[:3], x_t[3], u_t))
-            F4  = np.eye(4);  F4[:3, :3] = F3
-            P   = F4 @ P @ F4.T + Q4
+            u_t = self._solver.get(max(t - 1, 0), "u") if self._initialized else np.zeros(self.nu)
+            F4  = np.array(self._F_full_fn(x_t, u_t))
+            F_xy[:3, :3] = F4[:3, :3]
+            P = F_xy[:3, :3] @ P @ F_xy[:3, :3].T + self._Q3
+
+            sigma_xy = np.sqrt(np.clip(np.diag(P)[:2], 0.0, None))
+            lbx_t = self._lbx_nom.copy()
+            ubx_t = self._ubx_nom.copy()
+            lbx_t[xy_slots] = self._lbx_nom[xy_slots] + beta * sigma_xy
+            ubx_t[xy_slots] = self._ubx_nom[xy_slots] - beta * sigma_xy
+
+            self._solver.constraints_set(t, "lbx", lbx_t)
+            self._solver.constraints_set(t, "ubx", ubx_t)
 
     def _reset_stage_constraints(self):
-        half_y = self.params["slider_half_y"]
         for t in range(1, self.T):
-            self._solver.constraints_set(t, "lbx", np.array([-half_y]))
-            self._solver.constraints_set(t, "ubx", np.array([ half_y]))
+            self._solver.constraints_set(t, "lbx", self._lbx_nom)
+            self._solver.constraints_set(t, "ubx", self._ubx_nom)
 
     def reset(self, x0_world: np.ndarray = None, ref_world: np.ndarray = None):
         self._initialized = False
+        self._reset_stage_constraints()
         if x0_world is not None and ref_world is not None:
             self._seed_warm_start(x0_world, ref_world)
 
