@@ -26,10 +26,10 @@ scenario:
     y: [-0.20, 0.20]      # symmetric lateral range, avoids side-reach singularity
     theta: [-0.4, 0.4]  # +-45 deg; wider is fine when symmetry=pi/2
   start:
-    xy: [0.6, -0.1]
+    xy: [0.6, 0.1]
     theta: 0.0
   goal:
-    xy: [0.5,  0.1]
+    xy: [0.5,  -0.1]
     theta: 0.2
 
 goal_pos_tol:   0.060       # 8cm
@@ -42,7 +42,7 @@ planner:
   theta_delay_frac: 0.5
 
 mpc:
-  variant: "UNCERTAINTY_AWARE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
   horizon: 200
   dt: 0.01
   Q: [30.0, 30.0, 30.0, 1.0e-4]

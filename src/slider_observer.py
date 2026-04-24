@@ -90,6 +90,7 @@ class SliderObserver:
             return len(self._detection_times)
 
     def is_localised(self, n_required: int, window_sec: float, cov_thresh: float = 1e-3) -> bool:
+        if self.variant == "BASELINE": return True
         if self.get_recent_detection_count(window_sec) < n_required:
             return False
         with self._ekf_lock:
@@ -108,6 +109,7 @@ class SliderObserver:
             self._detection_times.clear()
 
     def has_visual(self) -> bool:
+        if self.variant == "BASELINE": return True
         return self._last_visual is not None and (time.time() - self._last_visual) <= self._vision_lost_timeout
 
     def _prop_loop(self):
