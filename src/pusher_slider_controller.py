@@ -15,9 +15,11 @@ from simcore.common.pose import Pose
 
 
 class Phase(Enum):
+    ACQUIRE  = auto()
     APPROACH = auto()
     PUSHING  = auto()
     DONE     = auto()
+    LOST     = auto()
     FAILED   = auto()
 
 
@@ -43,22 +45,22 @@ class PusherSliderController:
 
         self._ps_model   = PusherSliderModel(self.config)
         self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
-        self._planner    = StraightLinePlanner(v_max=config["planner"]["v_max"], a_max=config["planner"]["a_max"])
+        self._planner    = StraightLinePlanner(v_max=config["planner"]["v_max"], 
+                                               a_max=config["planner"]["a_max"], theta_delay_frac=config["planner"]["theta_delay_frac"])
         self._trajectory = TrajectoryPlanner()
         self._observer   = SliderObserver(self.config, self.system, self._ps_model)
         self._logger     = EpisodeLogger(self.config)
 
-        self.phase        = Phase.APPROACH
+        self.phase        = Phase.ACQUIRE
         self.running      = False
         self._path_ref    = None
         self._step_idx    = 0
         self._episode_idx = 0
         self._contact_face = None
-        self._tip_ref_xy  = None
         self._last_obs_x  = None
         self._metrics     = None
         self._rng         = np.random.default_rng()
-
+        self._nmpc._F_fn = self._observer._ekf._F_fn
         self._ee_yaw_vis = None
 
     def loop(self):
@@ -76,10 +78,14 @@ class PusherSliderController:
         t0 = time.time()
 
         while self.running:
-            if self.phase == Phase.APPROACH:
+            if self.phase == Phase.ACQUIRE:
+                self.phase = self.run_aquire()
+            elif self.phase == Phase.APPROACH:
                 self.phase = self._run_approach()
             elif self.phase == Phase.PUSHING:
                 self.phase = self._run_pushing()
+            elif self.phase == Phase.LOST:
+                self.phase = self.run_detection_loss()
 
             if (time.time() - t0) > self.timeout:
                 print("[fail]: System stopped due to timeout")
@@ -97,6 +103,42 @@ class PusherSliderController:
                 self._episode_idx += 1
 
             time.sleep(self.mpc_dt)
+
+    def run_aquire(self) -> Phase:
+        cfg            = self.config["vision"]
+        n_required     = cfg["aquire_sample"]
+        window_sec     = cfg["aquire_window"]
+        cov_thresh     = 1e-2
+        workspace_x    = self.config["scenario"]["workspace"]["x"]
+        workspace_y    = self.config["scenario"]["workspace"]["y"]
+        centre_xy      = np.array([(workspace_x[0] + workspace_x[1]) / 2, (workspace_y[0] + workspace_y[1]) / 2])
+        centre_pos     = np.array([centre_xy[0], centre_xy[1], 1.2])
+
+        yaw_sweep_angles = np.deg2rad([-30.0, 0.0, 30.0])
+
+        p_current = self._get_ee_pose().position
+        self._move_to(p_current, centre_pos, max_speed=0.1, callback=lambda: self._observer.is_localised(n_required, window_sec, cov_thresh))
+
+        if self._observer.is_localised(n_required, window_sec, cov_thresh):
+            return Phase.APPROACH
+
+        for yaw in yaw_sweep_angles:
+            q_target = quat_wxyz_from_tool_yaw(yaw)
+            p_now    = self._get_ee_pose().position
+            self._move_to(p_now, centre_pos, max_speed=0.05, q_start=self.ee_quat_ref, q_end=q_target,
+                            callback=lambda: self._observer.is_localised(n_required, window_sec, cov_thresh))
+            self.ee_quat_ref = q_target
+
+            if self._observer.is_localised(n_required, window_sec, cov_thresh):
+                return Phase.APPROACH
+
+            time.sleep(0.3)
+            
+        count = self._observer.get_recent_detection_count(window_sec)
+        loc   = self._observer.is_localised(n_required, window_sec, cov_thresh)
+        print(f"[acquire] detections={count}/{n_required}  localised={loc}")
+
+        return Phase.ACQUIRE
 
     def _run_approach(self):
         x_slider = self._observer.get_state()
@@ -123,15 +165,19 @@ class PusherSliderController:
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
 
         self._plan_path(x_slider)
-        self._tip_ref_xy = self._get_pusher_tip()[:2].copy()
         self.system.set_controller_params(self.device_name, {"K_cart": [1000, 1000, 600, 160, 160, 160]})
 
-        ref_win  = self._planner.window(self._path_ref, 0, self._nmpc.T)
+        self._step_idx = self._planner.nearest_idx(self._path_ref, x_slider)
+        ref_win = self._planner.window(self._path_ref, self._step_idx, self._nmpc.T)
         self._nmpc.reset(x0_world=x_slider, ref_world=ref_win)
 
         return Phase.PUSHING
 
     def _run_pushing(self):
+        if not self._observer.has_visual():
+            self.phase = Phase.LOST
+            print("[warn] vision lost during pushing")
+            return
         x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
@@ -140,10 +186,12 @@ class PusherSliderController:
         p_y = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
         x0  = np.array([x_slider[0], x_slider[1], x_slider[2], p_y])
 
+        self._step_idx = self._planner.nearest_idx(self._path_ref, x_slider)
         ref_win = self._planner.window(self._path_ref, self._step_idx, self._nmpc.T)
 
         t_solve       = time.perf_counter()
-        u_opt, status = self._nmpc.solve(x0, ref_win)
+        P             = self._observer.get_covariance()
+        u_opt, status = self._nmpc.solve(x0, ref_win, P=P)
         solve_time_ms = (time.perf_counter() - t_solve) * 1000.0
         self._observer.set_control(u_opt)
         self._observer.set_py(p_y)
@@ -151,11 +199,9 @@ class PusherSliderController:
         if status != 0:
             print(f"[warn] solver status {status} at step {self._step_idx}")
 
-        ee_vel_world = self._canonical_vel_to_world(u_opt, x_slider[2], self._contact_face)
-
-        self._tip_ref_xy = self._tip_ref_xy + ee_vel_world[:2] * self.mpc_dt
-        tip_ref_world    = np.array([self._tip_ref_xy[0], self._tip_ref_xy[1], self.z_contact])
-        ee_ref_pose      = Pose(position=self._tip_to_ee(tip_ref_world), quaternion=self.ee_quat_ref)
+        ee_vel_world  = self._canonical_vel_to_world(u_opt, x_slider[2], self._contact_face)
+        tip_ref_world = np.array([*self._get_pusher_tip()[:2] + ee_vel_world[:2] * self.mpc_dt, self.z_contact])
+        ee_ref_pose   = Pose(position=self._tip_to_ee(tip_ref_world), quaternion=self.ee_quat_ref)
 
         self.system.set_target(self.device_name, {
             "x":  ee_ref_pose,
@@ -168,13 +214,15 @@ class PusherSliderController:
 
         gt_state = self._observer.get_gt_state()
         est_state = self._observer.get_est_state()
-        obs_cov = self._observer.get_covariance()
+        est_cov = self._observer.get_covariance()
+        vis_state = self._observer.get_vision_state()
 
         self._logger.record(
             gt_state      = gt_state,
             obs_state     = x_slider,
-            vis_state     = est_state,
-            obs_cov       = obs_cov,
+            est_state     = est_state,
+            vis_state     = vis_state,
+            est_cov       = est_cov,
             control       = u_opt,
             ref_state     = ref_win[0],
             p_y           = p_y,
@@ -197,11 +245,21 @@ class PusherSliderController:
             print(f"[fail] plan ended {grace_steps} steps ago, pos_err={pos_err*1000:.1f}mm  theta_err={np.degrees(theta_err):.1f}deg")
             return Phase.FAILED
 
-        if np.linalg.norm(x_slider[:2] - self._tip_ref_xy) > 0.2:
+        if np.linalg.norm(x_slider[:2] - self._get_pusher_tip()[:2]) > 0.2:
             print("[fail]: Pusher left slider")
             return Phase.FAILED
 
         return Phase.PUSHING
+    
+    def run_detection_loss(self) -> Phase:
+        self._observer.reset()
+        self._nmpc.reset()
+        self._path_ref     = None
+        self._step_idx     = 0
+        self._contact_face = None
+        self._last_obs_x   = None
+        self._ee_yaw_vis   = None
+        return Phase.ACQUIRE
 
     def _plan_path(self, x_slider):
         start = np.array([x_slider[0], x_slider[1], x_slider[2], 0.0])
@@ -269,22 +327,25 @@ class PusherSliderController:
         R = Rotation.from_quat(wxyz_to_xyzw(ee_pose.quaternion)).as_matrix()
         return tip_world - R @ np.array([0.0, 0.0, self.pusher_length])
 
-    def _move_to(self, p_start, p_end, max_speed):
-        self._trajectory.plan_with_speed(p_start, self.ee_quat_ref, p_end, self.ee_quat_ref, max_speed=max_speed)
+    def _move_to(self, p_start, p_end, max_speed, q_start=None, q_end=None, callback=None):
+        q_s = q_start if q_start is not None else self.ee_quat_ref
+        q_e = q_end   if q_end   is not None else self.ee_quat_ref
+        self._trajectory.plan_with_speed(p_start, q_s, p_end, q_e, max_speed=max_speed)
         while not self._trajectory.is_done():
             step = self._trajectory.step(self.sim_dt)
             pose = Pose(position=step["pos"], quaternion=step["quat"])
             vel  = np.concatenate([step["vel"], step["omega"]])
             self.system.set_target(self.device_name, {"x": pose, "xd": vel})
+            if callback and callback():
+                break
             time.sleep(self.sim_dt)
 
     def reset(self):
-        self.phase         = Phase.APPROACH
+        self.phase         = Phase.ACQUIRE
         self.running       = True
         self._path_ref     = None
         self._step_idx     = 0
         self._contact_face = None
-        self._tip_ref_xy   = None
         self._last_obs_x   = None
         self._ee_yaw_vis = None
         self._nmpc.reset()

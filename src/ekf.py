@@ -9,7 +9,6 @@ class SliderEKF:
         self.dt  = mpc_cfg["dt"]
         self._gate_thresh = mpc_cfg["ekf_gate_thresh"]
         self.nx  = 3
-        self._P_max_diag = np.array([0.01, 0.01, 0.05])
 
         self.Q = np.diag(np.array(mpc_cfg["ekf_Q"], dtype=float))
         self.R = np.diag(np.array(mpc_cfg["ekf_R"], dtype=float))
@@ -56,7 +55,6 @@ class SliderEKF:
         x_next[2] = wrap_to_pi(x_next[2])
         F         = np.array(self._F_fn(self._x, p_y, self._u))
         self._P   = F @ self._P @ F.T + self.Q
-        np.fill_diagonal(self._P, np.minimum(np.diag(self._P), self._P_max_diag))
         self._x   = x_next
 
     def update(self, z: np.ndarray):
@@ -68,28 +66,15 @@ class SliderEKF:
         S      = self._P + self.R
         
         # Mahalanobis gate — reject outlier measurements
-        #mahal_sq = float(inn @ np.linalg.solve(S, inn))
-        #if mahal_sq > self._gate_thresh:
-        #    return
-    
-        R_diag = np.diag(self.R)
-        if np.any(inn**2 > 25 * R_diag):  # 5-sigma per component
+        S = self._P + self.R
+        mahal_sq = float(inn @ np.linalg.solve(S, inn))
+        if mahal_sq > self._gate_thresh:
             return
         
         K          = self._P @ np.linalg.solve(S.T, np.eye(self.nx)).T
         self._x    = self._x + K @ inn
         self._x[2] = wrap_to_pi(self._x[2])
         self._P    = (np.eye(self.nx) - K) @ self._P
-
-    def _propagate_covariance(self, x0_can, u_traj, P0):
-        P = P0.copy()
-        Ps = [P]
-        for k in range(self.T):
-            u_k = u_traj[k] if u_traj is not None else np.zeros(2)
-            F   = np.array(self._F_fn(x0_can, 0.0, u_k))
-            P   = F @ P @ F.T + self.Q_ekf
-            Ps.append(P)
-        return Ps
 
     def initialised(self) -> bool:
         return self._x is not None

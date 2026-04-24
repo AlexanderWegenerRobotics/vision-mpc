@@ -33,9 +33,10 @@ class EpisodeLogger:
             "t":               np.zeros(N),
             "gt_state":        np.zeros((N, 3)),
             "obs_state":       np.zeros((N, 3)),
+            "est_state":       np.zeros((N, 3)),
             "vis_state":       np.full((N, 3), np.nan),
             "detection_valid": np.zeros(N, dtype=bool),
-            "obs_cov":         np.zeros((N, 3, 3)),
+            "est_cov":         np.zeros((N, 3, 3)),
             "control":         np.zeros((N, 2)),
             "ref_state":       np.zeros((N, 4)),
             "p_y":             np.zeros(N),
@@ -46,7 +47,7 @@ class EpisodeLogger:
             "pusher_tip":      np.zeros((N, 2)),
         }
 
-    def record(self, gt_state, obs_state, vis_state, obs_cov, control, ref_state, p_y,
+    def record(self, gt_state, obs_state, est_state, vis_state, est_cov, control, ref_state, p_y,
                solver_status, solve_time_ms, ee_pos, ee_vel, pusher_tip):
         if self._buf is None or self._n >= self._max_steps:
             return
@@ -55,9 +56,10 @@ class EpisodeLogger:
         self._buf["t"][i]               = time.time() - self._t0
         self._buf["gt_state"][i]        = gt_state
         self._buf["obs_state"][i]       = obs_state
+        self._buf["est_state"][i]       = est_state
         self._buf["detection_valid"][i] = detected
         self._buf["vis_state"][i]       = vis_state if detected else np.full(3, np.nan)
-        self._buf["obs_cov"][i]         = obs_cov
+        self._buf["est_cov"][i]         = est_cov
         self._buf["control"][i]         = control
         self._buf["ref_state"][i]       = ref_state
         self._buf["p_y"][i]             = p_y

@@ -32,35 +32,39 @@ scenario:
     xy: [0.5,  0.1]
     theta: 0.2
 
-goal_pos_tol:   0.040       # 4cm
-goal_theta_tol: 0.261799    # ca. 15deg
+goal_pos_tol:   0.060       # 8cm
+goal_theta_tol: 0.349066    # ca. 20deg
 
 planner:
-  v_max: 0.05    # cruise speed (m/s) for trapezoidal profile
-  a_max: 0.10    # accel/decel rate (m/s^2)
+  v_max: 0.3    # cruise speed (m/s) for trapezoidal profile
+  a_max: 0.40    # accel/decel rate (m/s^2)
   symmetry: 1.5707963267948966  # pi/2 for a square slider; 2*pi for no symmetry
+  theta_delay_frac: 0.5
 
 mpc:
-  variant: "CERTAINTY_EQUIV"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  variant: "UNCERTAINTY_AWARE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
   horizon: 200
   dt: 0.01
-  Q: [50.0, 50.0, 50.0, 1.0e-4]
+  Q: [30.0, 30.0, 30.0, 1.0e-4]
   R: [5.0, 5.0]
-  Q_terminal_scale: 50.0
+  Q_terminal_scale: 30.0
   v_n_max: 0.5
-  v_t_max: 0.5
+  v_t_max: 0.3
   mu_slider: 0.3
   mu_ground: 0.3
   slider_mass: 0.3
   nlp_solver_max_iter: 70
-  ekf_Q: [5e-5, 5e-5, 5e-4]     # process noise
+  ekf_Q: [5e-4, 5e-4, 5e-3]     # process noise
   ekf_R: [1e-4, 1e-4, 3e-4]   # measurement noise
   ekf_gate_thresh: 7.81
 
 vision:
-  f_estimation: 30.0
+  f_estimation: 60.0
   cam_name: eye_in_hand
   marker_size: 0.031
+  timeout: 0.5
+  aquire_sample: 20
+  aquire_window: 0.5
 
   T_ee_cam:
     pos: [0.0393, -0.0392, 0.043]

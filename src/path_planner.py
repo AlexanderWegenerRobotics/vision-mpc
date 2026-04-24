@@ -3,18 +3,11 @@ from abc import ABC, abstractmethod
 from src.mpc import Face
 
 class PathPlanner(ABC):
-    # Emits a reference trajectory of shape [N+1, 4] with columns
-    # [x_S, y_S, theta_S, p_y_ref] sampled at dt. p_y_ref is typically 0;
-    # MPC weights it lightly so the solver picks the actual offset.
-
     @abstractmethod
     def plan(self, start: np.ndarray, goal: np.ndarray, n_steps: int, dt: float) -> np.ndarray:
         ...
 
     def window(self, full_ref: np.ndarray, step: int, horizon: int) -> np.ndarray:
-        # Returns a horizon+1 slice starting at `step`. If step is past the end
-        # of the plan, the window is fully padded with the last reference row
-        # (i.e. "hold at goal"). Never raises on out-of-range step.
         n = len(full_ref)
         if n == 0:
             raise ValueError("full_ref is empty")
@@ -25,26 +18,20 @@ class PathPlanner(ABC):
             pad = np.tile(win[-1], (horizon + 1 - len(win), 1))
             win = np.vstack([win, pad])
         return win
+    
+    def nearest_idx(self, full_ref: np.ndarray, x_slider: np.ndarray) -> int:
+        dists = np.linalg.norm(full_ref[:, :2] - x_slider[:2], axis=1)
+        return int(np.argmin(dists))
 
 
 class StraightLinePlanner(PathPlanner):
-    # Straight line with trapezoidal velocity profile: accelerate from rest,
-    # cruise at v_max, decelerate to rest at the goal. Falls back to a triangular
-    # profile if the distance is too short to reach v_max. Position and theta
-    # interpolate at the same normalized progress s(t) in [0, 1] so orientation
-    # slows into the goal alongside position.
-    # symmetry: rotational symmetry of the slider. For a square use pi/2; for
-    # a generic shape use 2*pi (no symmetry). The planner picks the equivalent
-    # goal orientation that requires the smallest rotation from start.
-
-    def __init__(self, v_max: float = 0.05, a_max: float = 0.10, symmetry: float = 2 * np.pi):
-        self.v_max    = float(v_max)
-        self.a_max    = float(a_max)
-        self.symmetry = float(symmetry)
+    def __init__(self, v_max: float = 0.05, a_max: float = 0.10, symmetry: float = 2 * np.pi, theta_delay_frac: float = 0.0):
+        self.v_max            = float(v_max)
+        self.a_max            = float(a_max)
+        self.symmetry         = float(symmetry)
+        self.theta_delay_frac = float(np.clip(theta_delay_frac, 0.0, 1.0))
 
     def plan(self, start: np.ndarray, goal: np.ndarray, n_steps: int, dt: float) -> np.ndarray:
-        # n_steps is ignored: the trapezoidal profile determines how many steps
-        # the path needs. Returned reference always has length n_profile+1.
         start_xy, goal_xy = start[:2], goal[:2]
         start_th, goal_th = start[2], self._nearest_goal_theta(start[2], goal[2], self.symmetry)
 
@@ -53,18 +40,23 @@ class StraightLinePlanner(PathPlanner):
             ref = np.tile(np.array([start_xy[0], start_xy[1], start_th, 0.0]), (2, 1))
             return ref
 
-        s_profile = self._trapezoidal_progress(distance, dt)  # [0..1], length N+1
+        s_profile = self._trapezoidal_progress(distance, dt)
+
+        theta_s = np.where(
+            s_profile < self.theta_delay_frac,
+            0.0,
+            (s_profile - self.theta_delay_frac) / (1.0 - self.theta_delay_frac + 1e-9)
+        )
+        theta_s = np.clip(theta_s, 0.0, 1.0)
+
         ref = np.zeros((len(s_profile), 4))
         ref[:, 0] = start_xy[0] + s_profile * (goal_xy[0] - start_xy[0])
         ref[:, 1] = start_xy[1] + s_profile * (goal_xy[1] - start_xy[1])
-        ref[:, 2] = start_th    + s_profile * (goal_th    - start_th)
+        ref[:, 2] = start_th   + theta_s   * (goal_th    - start_th)
         ref[:, 3] = 0.0
         return ref
 
     def _trapezoidal_progress(self, distance: float, dt: float) -> np.ndarray:
-        # Returns normalized progress s(t) in [0,1] sampled at dt. Handles
-        # both trapezoidal (distance large enough to reach v_max) and
-        # triangular (distance too short) cases.
         v_max, a_max = self.v_max, self.a_max
         d_accel      = v_max**2 / (2 * a_max)
 
@@ -106,16 +98,10 @@ class StraightLinePlanner(PathPlanner):
 
     @staticmethod
     def _nearest_goal_theta(start_th: float, goal_th: float, symmetry: float) -> float:
-        # Among all orientations equivalent to goal_th under rotational symmetry
-        # (i.e. goal_th + k*symmetry for integer k), return the one requiring the
-        # smallest rotation from start_th. The returned value is within pi of
-        # start_th so linear interpolation produces the minimal-rotation path.
         if symmetry >= 2 * np.pi - 1e-9:
             diff = (goal_th - start_th + np.pi) % (2 * np.pi) - np.pi
             return start_th + diff
 
-        # Map goal to its "canonical" representative in [0, symmetry), then enumerate
-        # equivalents around start_th and pick the one with smallest |diff|.
         g_canon    = goal_th - symmetry * np.floor(goal_th / symmetry)
         n_wraps    = int(np.ceil(2 * np.pi / symmetry)) + 2
         base       = start_th - np.pi
@@ -126,9 +112,6 @@ class StraightLinePlanner(PathPlanner):
 
 
 class CircularPlanner(PathPlanner):
-    # Constant-speed circular arc. Center and radius fixed at construction;
-    # start/goal passed to plan() are used only to pick the starting angle on
-    # the circle and travel direction. Slider heading is kept tangent to the path.
 
     def __init__(self, center: np.ndarray, radius: float, direction: str = "ccw"):
         assert direction in ("cw", "ccw")

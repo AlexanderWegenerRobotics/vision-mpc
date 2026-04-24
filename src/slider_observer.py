@@ -1,6 +1,7 @@
 import numpy as np
 import threading
 import time
+from collections import deque
 from scipy.spatial.transform import Rotation
 from simcore import RobotSystem
 
@@ -11,10 +12,11 @@ from src.utils import wxyz_to_xyzw
 
 class SliderObserver:
     def __init__(self, config: dict, system: RobotSystem, model=None):
-        self.config      = config
-        self.system      = system
-        self.variant     = config["mpc"]["variant"]
-        self.slider_name = config["slider_name"]
+        self.config                 = config
+        self.system                 = system
+        self.variant                = config["mpc"]["variant"]
+        self.slider_name            = config["slider_name"]
+        self._vision_lost_timeout   = config["vision"]["timeout"]
 
         self.estimator = PoseEstimation(config, system)
         self.est_dt    = 1.0 / config.get("vision", {}).get("f_estimation", 30.0)
@@ -28,9 +30,12 @@ class SliderObserver:
         self._new_meas  = False
         self._pending_z = None
 
-        self.running     = False
-        self._est_thread = None
+        self.running      = False
+        self._est_thread  = None
         self._prop_thread = None
+        self._last_visual = None
+
+        self._detection_times = deque()
 
     def start(self):
         if self.running: return
@@ -73,20 +78,45 @@ class SliderObserver:
         with self._ekf_lock:
             return self._ekf.covariance if self._ekf is not None else None
 
+    def get_vision_state(self) -> np.ndarray:
+        with self._ekf_lock:
+            return self._pending_z if self._pending_z is not None else None
+
+    def get_recent_detection_count(self, window_sec: float) -> int:
+        now = time.time()
+        with self._est_lock:
+            while self._detection_times and self._detection_times[0] < now - window_sec:
+                self._detection_times.popleft()
+            return len(self._detection_times)
+
+    def is_localised(self, n_required: int, window_sec: float, cov_thresh: float = 1e-3) -> bool:
+        if self.get_recent_detection_count(window_sec) < n_required:
+            return False
+        with self._ekf_lock:
+            if self._ekf is None or not self._ekf.initialised():
+                return False
+            return float(np.trace(self._ekf.covariance)) < cov_thresh
+
     def reset(self, x0: np.ndarray = None):
         with self._ekf_lock:
             if self._ekf is not None:
                 self._ekf.reset(x0=x0)
-            self._py       = 0.0
+            self._py        = 0.0
             self._pending_z = None
+        self._last_visual = None
+        with self._est_lock:
+            self._detection_times.clear()
+
+    def has_visual(self) -> bool:
+        return self._last_visual is not None and (time.time() - self._last_visual) <= self._vision_lost_timeout
 
     def _prop_loop(self):
-        # Propagate EKF belief at MPC rate; fuse pending vision measurement when available.
+        # Propagate EKF at MPC rate; fuse pending vision measurement when available.
         while self.running:
             t0 = time.perf_counter()
 
             with self._ekf_lock:
-                z = self._pending_z
+                z  = self._pending_z
                 self._pending_z = None
                 py = self._py
 
@@ -104,8 +134,7 @@ class SliderObserver:
                 time.sleep(sleep)
 
     def _est_loop(self):
-        # Run vision estimation at camera rate; post measurements for the propagation loop.
-        print(f"Trying to run estimation loop: {self.running}")
+        # Run vision at camera rate; post measurements for the propagation loop.
         while self.running:
             t0 = time.perf_counter()
             z  = self.estimator.get_pose_estimate()
@@ -113,6 +142,10 @@ class SliderObserver:
             if z is not None:
                 with self._ekf_lock:
                     self._pending_z = z
+                now = time.time()
+                self._last_visual = now
+                with self._est_lock:
+                    self._detection_times.append(now)
 
             sleep = self.est_dt - (time.perf_counter() - t0)
             if sleep > 0:
