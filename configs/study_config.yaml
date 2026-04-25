@@ -1,0 +1,4 @@
+keepout:
+  enabled: true
+  lbx: [-1.0e6, -1.0e6, -0.05]
+  ubx: [ 1.0e6,  0.13,   0.05]

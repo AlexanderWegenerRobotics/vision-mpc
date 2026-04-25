@@ -54,8 +54,9 @@ mpc:
   mu_ground: 0.3
   slider_mass: 0.3
   nlp_solver_max_iter: 20
-  ekf_Q: [5e-4, 5e-4, 5e-3]     # process noise
+  ekf_Q: [1e-5, 1e-5, 1e-4]     # process noise
   ekf_R: [1e-4, 1e-4, 3e-4]   # measurement noise
+  cc_Q: [1e-6, 1e-6, 1e-5]
   ekf_gate_thresh: 7.81
   cc_beta: 1.645         # 95% one-sided
 

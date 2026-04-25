@@ -8,8 +8,7 @@ def main():
     system.set_controller_mode("arm", "position")
     system.set_target("arm", {"q":[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]})
 
-    task_config = load_yaml(config.get("task_config"))
-    controller = PusherSliderController(system=system, config=task_config)
+    controller = PusherSliderController(system=system, config=config)
 
     task_thread = threading.Thread(target=controller.loop, daemon=True)
     task_thread.start()

@@ -11,7 +11,7 @@ from src.logger import EpisodeLogger
 from src.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz,
                        EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario,
                        quat_wxyz_from_tool_yaw, wrap_to_pi)
-from simcore.common.pose import Pose
+from simcore import RobotSystem, Pose, load_yaml
 
 
 class Phase(Enum):
@@ -25,28 +25,30 @@ class Phase(Enum):
 
 class PusherSliderController:
     def __init__(self, system=None, config=None):
-        self.config        = config
+
+        self.config        = load_yaml(config.get("task_config"))
+        self.study_cfg     = load_yaml(config.get("study_config"))
         self.system        = system
-        self.slider_name   = config["slider_name"]
-        self.device_name   = config["arm_name"]
-        self.pusher_length = config["pusher_length"]
-        self.z_contact     = config["surface_height_world"] + config["pusher_clearance"]
-        self.q_init        = config["q_init"]
+        self.slider_name   = self.config["slider_name"]
+        self.device_name   = self.config["arm_name"]
+        self.pusher_length = self.config["pusher_length"]
+        self.z_contact     = self.config["surface_height_world"] + self.config["pusher_clearance"]
+        self.q_init        = self.config["q_init"]
         self.ee_quat_ref   = np.array([0, 1, 0, 0])
         self.sim_dt        = self.system.get_timestep()
-        self.mpc_dt        = config["mpc"]["dt"]
-        self.timeout       = config["timeout"]
-        self.variant       = ControllerVariant[config["mpc"]["variant"]]
+        self.mpc_dt        = self.config["mpc"]["dt"]
+        self.timeout       = self.config["timeout"]
+        self.variant       = ControllerVariant[self.config["mpc"]["variant"]]
 
-        self.start_xy    = np.array(config["scenario"]["start"]["xy"], dtype=float)
-        self.start_theta = float(config["scenario"]["start"]["theta"])
-        self.goal_xy     = np.array(config["scenario"]["goal"]["xy"], dtype=float)
-        self.goal_theta  = float(config["scenario"]["goal"]["theta"])
+        self.start_xy    = np.array(self.config["scenario"]["start"]["xy"], dtype=float)
+        self.start_theta = float(self.config["scenario"]["start"]["theta"])
+        self.goal_xy     = np.array(self.config["scenario"]["goal"]["xy"], dtype=float)
+        self.goal_theta  = float(self.config["scenario"]["goal"]["theta"])
 
         self._ps_model   = PusherSliderModel(self.config)
         self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
-        self._planner    = StraightLinePlanner(v_max=config["planner"]["v_max"], 
-                                               a_max=config["planner"]["a_max"], theta_delay_frac=config["planner"]["theta_delay_frac"])
+        self._planner    = StraightLinePlanner(v_max=self.config["planner"]["v_max"], 
+                                               a_max=self.config["planner"]["a_max"], theta_delay_frac=self.config["planner"]["theta_delay_frac"])
         self._trajectory = TrajectoryPlanner()
         self._observer   = SliderObserver(self.config, self.system, self._ps_model)
         self._logger     = EpisodeLogger(self.config)
@@ -144,6 +146,10 @@ class PusherSliderController:
         x_slider = self._observer.get_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
+        keepout = self.study_cfg.get("keepout", {})
+        if keepout.get("enabled", False):
+            self._nmpc.set_state_keepout(np.array(keepout["lbx"]), np.array(keepout["ubx"]))
+
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
 
         contact_world = self._contact_point_world(x_slider, self._contact_face)
@@ -351,6 +357,13 @@ class PusherSliderController:
         self._nmpc.reset()
         self.system.clear_trail("ee_trail")
         update_vel_arrow(self.system, Pose(position=np.zeros(3), quaternion=np.array([0, 0, 0, 1])), np.ones(3), 0.0)
+
+        keepout = self.study_cfg.get("keepout", {})
+        if keepout.get("enabled", False):
+            y_wall = keepout["ubx"][1]
+            self.system.clear_trail("wall_trail")
+            for x in np.linspace(0.4, 0.7, 30):
+                self.system.set_trail("wall_trail", np.array([x, y_wall, self.z_contact]))
 
         if self.config["scenario"].get("mode", "fixed") == "random":
             self.start_xy, self.start_theta, self.goal_xy, self.goal_theta = \

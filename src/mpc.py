@@ -132,6 +132,7 @@ class PusherSliderNMPC:
         self._cc_beta       = float(mpc_cfg.get("cc_beta", 1.645))
         self._cc_min_half_y = float(mpc_cfg.get("cc_min_half_y", 0.01))
         self._ekf_Q         = np.array(mpc_cfg["ekf_Q"], dtype=float)
+        self.cc_Q           = mpc_cfg.get("cc_Q", None)
 
         self._lbx_nom = None
         self._ubx_nom = None
@@ -211,7 +212,8 @@ class PusherSliderNMPC:
         F_expr = ca.jacobian(x_next, self.model.x_sym)
         self._F_full_fn = ca.Function("F_full", [self.model.x_sym, self.model.u_sym], [F_expr])
 
-        self._Q3 = np.diag(self._ekf_Q)
+        if self.cc_Q is not None: self._Q3 = np.diag(np.array(self.cc_Q, dtype=float))
+        else: self._Q3 = np.diag(self._ekf_Q)
 
     def set_face(self, face: Face):
         # Selects which slider face is in contact for this episode. MPC always
