@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 
 from src.trajectory import TrajectoryPlanner
 from src.mpc import PusherSliderModel, PusherSliderNMPC, Face, ControllerVariant
-from src.path_planner import StraightLinePlanner, choose_face
+from src.path_planner import StraightLinePlanner, choose_face, DubinsPlanner
 from src.slider_observer import SliderObserver
 from src.logger import EpisodeLogger
 from src.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz,
@@ -49,6 +49,8 @@ class PusherSliderController:
         self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
         self._planner    = StraightLinePlanner(v_max=self.config["planner"]["v_max"], 
                                                a_max=self.config["planner"]["a_max"], theta_delay_frac=self.config["planner"]["theta_delay_frac"])
+    
+        #self._planner = DubinsPlanner(R_min=0.10, v_max=self.config["planner"]["v_max"], a_max=self.config["planner"]["a_max"])
         self._trajectory = TrajectoryPlanner()
         self._observer   = SliderObserver(self.config, self.system, self._ps_model)
         self._logger     = EpisodeLogger(self.config)

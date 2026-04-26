@@ -1,7 +1,7 @@
-iterations: 10
+iterations: 20
 slider_name: "box"
 arm_name: "arm"
-timeout: 20.0
+timeout: 25.0
 log_dir: "log"
 
 pusher_length: 0.167
@@ -24,13 +24,13 @@ scenario:
   workspace:
     x: [0.40, 0.60]       # Franka-reachable band away from base column
     y: [-0.20, 0.20]      # symmetric lateral range, avoids side-reach singularity
-    theta: [-0.4, 0.4]  # +-45 deg; wider is fine when symmetry=pi/2
+    theta: [-0.3, 0.3]  # +-45 deg; wider is fine when symmetry=pi/2
   start:
-    xy: [0.4, 0.0]
+    xy: [0.5, -0.2]
     theta: 0.0
   goal:
-    xy: [0.7,  0.0]
-    theta: 0.0
+    xy: [0.6,  0.2]
+    theta: 0.1
 
 goal_pos_tol:   0.040       # 8cm
 goal_theta_tol: 0.349066    # ca. 20deg
@@ -39,14 +39,14 @@ planner:
   v_max: 0.1    # cruise speed (m/s) for trapezoidal profile
   a_max: 0.40    # accel/decel rate (m/s^2)
   symmetry: 1.5707963267948966  # pi/2 for a square slider; 2*pi for no symmetry
-  theta_delay_frac: 0.5
+  theta_delay_frac: 0.3
 
 mpc:
   variant: "UNCERTAINTY_AWARE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
   horizon: 100
   dt: 0.01
-  Q: [30.0, 30.0, 30.0, 1.0e-4]
-  R: [0.5, 2.0]
+  Q: [30.0, 30.0, 50.0, 1.0e-4]
+  R: [0.5, 1.5]
   Q_terminal_scale: 30.0
   v_n_max: 0.5
   v_t_max: 0.3
