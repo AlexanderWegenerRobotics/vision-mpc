@@ -1,3 +1,4 @@
+import os
 import casadi as ca
 import numpy as np
 from enum import Enum, auto
@@ -149,6 +150,7 @@ class PusherSliderNMPC:
         acados_model.f_expl_expr = self.model.f_expr
 
         ocp       = AcadosOcp()
+        ocp.code_export_directory = f"c_generated_code_{os.environ.get('ACADOS_VARIANT_TAG', 'default')}"
         ocp.model = acados_model
         ocp.solver_options.N_horizon = self.T
         ocp.solver_options.tf        = self.T * p["dt"]
@@ -199,7 +201,9 @@ class PusherSliderNMPC:
         ocp.solver_options.hessian_approx      = "GAUSS_NEWTON"
         ocp.solver_options.print_level         = 0
 
-        self._solver  = AcadosOcpSolver(ocp, json_file="pusher_slider_ocp.json")
+        json_name = f"pusher_slider_ocp_{os.environ.get('ACADOS_VARIANT_TAG', 'default')}.json"
+        self._solver = AcadosOcpSolver(ocp, json_file=json_name)
+        #self._solver  = AcadosOcpSolver(ocp, json_file="pusher_slider_ocp.json")
         self._Q_nom   = Q_mat.copy()
         self._R_mat   = R_mat.copy()
         self._lbx_nom = lbx.copy()

@@ -33,3 +33,6 @@ results/
 
 # others
 others/
+c_generated_code_default/
+analysis/figures/
+pusher_slider_ocp_default.json

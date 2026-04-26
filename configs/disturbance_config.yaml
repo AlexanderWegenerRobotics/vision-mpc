@@ -1,8 +1,8 @@
-scenario: "free"           # "free" | "keepout"
-level_name: "clean"        # used for log folder + csv suffix
+scenario: "keepout"
+level_name: "latency_high"
 
 disturbance:
-  sigma_xy: 0.0
-  sigma_theta: 0.0
+  sigma_xy: 0.000
+  sigma_theta: 0.000
   drop_prob: 0.0
-  latency_frames: 0
+  latency_frames: 10

@@ -27,10 +27,10 @@ scenario:
     theta: [-0.3, 0.3]  # +-45 deg; wider is fine when symmetry=pi/2
   start:
     xy: [0.5, -0.2]
-    theta: 0.0
+    theta: 0.2
   goal:
-    xy: [0.6,  0.2]
-    theta: 0.1
+    xy: [0.6,  0.3]
+    theta: 0.0
 
 goal_pos_tol:   0.040       # 8cm
 goal_theta_tol: 0.349066    # ca. 20deg
@@ -42,7 +42,7 @@ planner:
   theta_delay_frac: 0.3
 
 mpc:
-  variant: "UNCERTAINTY_AWARE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
+  variant: "BASELINE"   # BASELINE | CERTAINTY_EQUIV | UNCERTAINTY_AWARE
   horizon: 100
   dt: 0.01
   Q: [30.0, 30.0, 50.0, 1.0e-4]

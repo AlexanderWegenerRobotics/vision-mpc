@@ -3,7 +3,7 @@ render_fps: 30
 
 headless: False
 display:
-  enabled: False
+  enabled: True
   # Options: horizontal, vertical, grid
   layout: grid
   grid_cols: 2
@@ -54,7 +54,7 @@ devices:
 objects:
   - name: table
     type: static
-    model_path: assets/mujoco/props/table.xml
+    model_path: /Users/alex/Workspace/projects/vision_mpc/models/mujoco/props/table.xml
     pose:
       position: [0.4, 0, 0]
       orientation: [1, 0, 0, 0]

@@ -92,6 +92,8 @@ class PusherSliderController:
         finally:
             self._observer.stop()
             print("[observer] vision thread stopped")
+            print("[loop] all seeds complete, stopping system")
+            self.system.stop()
 
     def run(self):
         self.reset()

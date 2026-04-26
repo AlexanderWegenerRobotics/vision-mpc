@@ -14,8 +14,8 @@ scenarios:
 
   keepout:
     start: { xy: [0.45, -0.05], theta: 0.0 }
-    goal:  { xy: [0.65,  0.08], theta: 0.0 }
+    goal:  { xy: [0.65,  0.05], theta: 0.0 }
     keepout:
       enabled: true
       lbx: [-1.0e6, -1.0e6, -0.05]
-      ubx: [ 1.0e6,  0.13,   0.05]
+      ubx: [ 1.0e6,  0.10,   0.05]
