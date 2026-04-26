@@ -26,17 +26,17 @@ scenario:
     y: [-0.20, 0.20]      # symmetric lateral range, avoids side-reach singularity
     theta: [-0.4, 0.4]  # +-45 deg; wider is fine when symmetry=pi/2
   start:
-    xy: [0.6, -0.1]
+    xy: [0.4, 0.0]
     theta: 0.0
   goal:
-    xy: [0.5,  0.1]
-    theta: 0.2
+    xy: [0.7,  0.0]
+    theta: 0.0
 
-goal_pos_tol:   0.060       # 8cm
+goal_pos_tol:   0.040       # 8cm
 goal_theta_tol: 0.349066    # ca. 20deg
 
 planner:
-  v_max: 0.3    # cruise speed (m/s) for trapezoidal profile
+  v_max: 0.1    # cruise speed (m/s) for trapezoidal profile
   a_max: 0.40    # accel/decel rate (m/s^2)
   symmetry: 1.5707963267948966  # pi/2 for a square slider; 2*pi for no symmetry
   theta_delay_frac: 0.5
@@ -54,7 +54,7 @@ mpc:
   mu_ground: 0.3
   slider_mass: 0.3
   nlp_solver_max_iter: 20
-  ekf_Q: [1e-5, 1e-5, 1e-4]     # process noise
+  ekf_Q: [1e-3, 1e-3, 1e-3]     # process noise
   ekf_R: [1e-4, 1e-4, 3e-4]   # measurement noise
   cc_Q: [1e-6, 1e-6, 1e-5]
   ekf_gate_thresh: 7.81

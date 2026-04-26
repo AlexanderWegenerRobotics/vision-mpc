@@ -55,6 +55,7 @@ class SliderEKF:
         x_next[2] = wrap_to_pi(x_next[2])
         F         = np.array(self._F_fn(self._x, p_y, self._u))
         self._P   = F @ self._P @ F.T + self.Q
+        #self._P = self._P + np.eye(self.nx) * 1e-6
         self._x   = x_next
 
     def update(self, z: np.ndarray):
@@ -66,7 +67,6 @@ class SliderEKF:
         S      = self._P + self.R
         
         # Mahalanobis gate — reject outlier measurements
-        S = self._P + self.R
         mahal_sq = float(inn @ np.linalg.solve(S, inn))
         if mahal_sq > self._gate_thresh:
             return

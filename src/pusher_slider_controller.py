@@ -62,7 +62,6 @@ class PusherSliderController:
         self._last_obs_x  = None
         self._metrics     = None
         self._rng         = np.random.default_rng()
-        self._nmpc._F_fn = self._observer._ekf._F_fn
         self._ee_yaw_vis = None
 
     def loop(self):
@@ -181,9 +180,12 @@ class PusherSliderController:
 
     def _run_pushing(self):
         if not self._observer.has_visual():
-            self.phase = Phase.LOST
             print("[warn] vision lost during pushing")
-            return
+            return Phase.ACQUIRE
+        P = self._observer.get_covariance()
+        if self.variant is not ControllerVariant.BASELINE and P is not None and np.trace(P) > 1e-2:
+            print("[warn] EKF covariance exceeds threshold during pushing")
+            return Phase.LOST
         x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
@@ -192,11 +194,10 @@ class PusherSliderController:
         p_y = np.clip(p_y, -self.config["slider_half_y"], self.config["slider_half_y"])
         x0  = np.array([x_slider[0], x_slider[1], x_slider[2], p_y])
 
-        self._step_idx = self._planner.nearest_idx(self._path_ref, x_slider)
+        self._step_idx = max(self._step_idx, self._planner.nearest_idx(self._path_ref, x_slider))
         ref_win = self._planner.window(self._path_ref, self._step_idx, self._nmpc.T)
 
         t_solve       = time.perf_counter()
-        P             = self._observer.get_covariance()
         u_opt, status = self._nmpc.solve(x0, ref_win, P=P)
         solve_time_ms = (time.perf_counter() - t_solve) * 1000.0
         self._observer.set_control(u_opt)
@@ -294,6 +295,13 @@ class PusherSliderController:
         u_body = np.array([ca * u[0] - sa * u[1], sa * u[0] + ca * u[1]])
         c, s   = np.cos(theta), np.sin(theta)
         return np.array([c * u_body[0] - s * u_body[1], s * u_body[0] + c * u_body[1], 0.0])
+    
+    def _world_vel_to_canonical(self, v_world_xy, theta, face):
+        face_angle = {Face.NEG_X: 0.0, Face.POS_Y: -np.pi/2, Face.POS_X: np.pi, Face.NEG_Y: np.pi/2}[face]
+        c, s = np.cos(theta), np.sin(theta)
+        v_body = np.array([ c * v_world_xy[0] + s * v_world_xy[1], -s * v_world_xy[0] + c * v_world_xy[1]])
+        ca, sa = np.cos(face_angle), np.sin(face_angle)
+        return np.array([ ca * v_body[0] + sa * v_body[1], -sa * v_body[0] + ca * v_body[1]])
 
     def _contact_point_world(self, x_slider, face):
         a, b   = self.config["slider_half_x"], self.config["slider_half_y"]
