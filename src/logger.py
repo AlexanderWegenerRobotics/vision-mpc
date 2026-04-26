@@ -5,9 +5,9 @@ from pathlib import Path
 
 
 class EpisodeLogger:
-    def __init__(self, config):
+    def __init__(self, config, log_subdir: str = ""):
         self.config   = config
-        self.log_dir  = Path(config.get("log_dir", "logs"))
+        self.log_dir  = Path(config.get("log_dir", "logs")) / log_subdir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.variant  = config["mpc"]["variant"]
         self._max_steps = int(config["timeout"] / config["mpc"]["dt"]) + int(5.0 / config["mpc"]["dt"]) + 10
@@ -70,12 +70,13 @@ class EpisodeLogger:
         self._buf["pusher_tip"][i]      = pusher_tip
         self._n += 1
 
-    def save(self, success: bool):
+    def save(self, success: bool, seed: int = None):
         if self._buf is None or self._n == 0:
             return
 
         n    = self._n
-        path = self.log_dir / f"episode_{self._episode_idx:04d}.h5"
+        suffix = f"_seed{seed:04d}" if seed is not None else ""
+        path = self.log_dir / f"episode_{self._episode_idx:04d}{suffix}.h5"
 
         with h5py.File(path, "w") as f:
             f.attrs["variant"]     = self._meta["variant"]

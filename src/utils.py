@@ -130,18 +130,36 @@ class EpisodeMetrics:
         self._xy_errors    = []
         self._solver_fails = 0
         self._n_solves     = 0
+        self._n_violations = 0
+        self._wall_lbx     = None
+        self._wall_ubx     = None
+
+    def set_keepout(self, lbx, ubx):
+        self._wall_lbx = np.array(lbx, dtype=float) if lbx is not None else None
+        self._wall_ubx = np.array(ubx, dtype=float) if ubx is not None else None
 
     def record_step(self, x_slider: np.ndarray, ref_xy: np.ndarray, solver_status: int):
         self._xy_errors.append(float(np.linalg.norm(x_slider[:2] - ref_xy)))
         self._n_solves     += 1
         self._solver_fails += int(solver_status != 0)
+        if self._wall_lbx is not None and self._wall_ubx is not None:
+            xy = x_slider[:2]
+            if (xy[0] < self._wall_lbx[0] or xy[0] > self._wall_ubx[0] or
+                xy[1] < self._wall_lbx[1] or xy[1] > self._wall_ubx[1]):
+                self._n_violations += 1
 
-    def summarise(self, x_slider_final: np.ndarray, success: bool) -> dict:
+    def summarise(self, x_slider_final: np.ndarray, success: bool,
+                  seed: int = -1, level_name: str = "", scenario: str = "",
+                  disturbance: dict = None) -> dict:
         pos_err   = float(np.linalg.norm(x_slider_final[:2] - self.goal_xy))
         theta_err = float(abs((x_slider_final[2] - self.goal_theta + np.pi) % (2 * np.pi) - np.pi))
         errors    = np.array(self._xy_errors)
+        d = disturbance or {}
         return {
             "variant":           self.variant,
+            "scenario":          scenario,
+            "level_name":        level_name,
+            "seed":              int(seed),
             "success":           int(success),
             "duration_s":        round(time.time() - self._t0, 3),
             "path_rms_mm":       round(float(np.sqrt(np.mean(errors**2))) * 1000, 3) if len(errors) else 0.0,
@@ -149,6 +167,11 @@ class EpisodeMetrics:
             "final_pos_mm":      round(pos_err * 1000, 3),
             "final_theta_deg":   round(np.degrees(theta_err), 3),
             "solver_fail_rate":  round(self._solver_fails / max(self._n_solves, 1), 4),
+            "n_violations":      int(self._n_violations),
+            "sigma_xy":          float(d.get("sigma_xy", 0.0)),
+            "sigma_theta":       float(d.get("sigma_theta", 0.0)),
+            "drop_prob":         float(d.get("drop_prob", 0.0)),
+            "latency_frames":    int(d.get("latency_frames", 0)),
             "start_x":           round(float(self.start_xy[0]), 4),
             "start_y":           round(float(self.start_xy[1]), 4),
             "start_theta":       round(self.start_theta, 4),
@@ -159,10 +182,11 @@ class EpisodeMetrics:
 
 
 _CSV_FIELDS = [
-    "variant", "success", "duration_s",
+    "variant", "scenario", "level_name", "seed", "success", "duration_s",
     "path_rms_mm", "path_max_mm",
     "final_pos_mm", "final_theta_deg",
-    "solver_fail_rate",
+    "solver_fail_rate", "n_violations",
+    "sigma_xy", "sigma_theta", "drop_prob", "latency_frames",
     "start_x", "start_y", "start_theta",
     "goal_x",  "goal_y",  "goal_theta",
 ]

@@ -2,3 +2,20 @@ keepout:
   enabled: true
   lbx: [-1.0e6, -1.0e6, -0.05]
   ubx: [ 1.0e6,  0.25,   0.05]
+
+scenarios:
+  free:
+    start: { xy: [0.45, -0.05], theta: 0.0 }
+    goal:  { xy: [0.75,  0.05], theta: 0.0 }
+    keepout:
+      enabled: false
+      lbx: [-1.0e6, -1.0e6, -0.05]
+      ubx: [ 1.0e6,  1.0e6,  0.05]
+
+  keepout:
+    start: { xy: [0.45, -0.05], theta: 0.0 }
+    goal:  { xy: [0.65,  0.08], theta: 0.0 }
+    keepout:
+      enabled: true
+      lbx: [-1.0e6, -1.0e6, -0.05]
+      ubx: [ 1.0e6,  0.13,   0.05]

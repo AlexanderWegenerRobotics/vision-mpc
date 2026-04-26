@@ -7,11 +7,12 @@ from simcore import RobotSystem
 
 from src.pose_estimation import PoseEstimation
 from src.ekf import SliderEKF
+from src.disturbance import DisturbanceModel
 from src.utils import wxyz_to_xyzw
 
 
 class SliderObserver:
-    def __init__(self, config: dict, system: RobotSystem, model=None):
+    def __init__(self, config: dict, system: RobotSystem, model=None, disturbance: DisturbanceModel = None):
         self.config                 = config
         self.system                 = system
         self.variant                = config["mpc"]["variant"]
@@ -24,6 +25,7 @@ class SliderObserver:
 
         self._ekf      = SliderEKF(model, config) if model is not None else None
         self._py       = 0.0
+        self._disturb  = disturbance
 
         self._est_lock  = threading.Lock()
         self._ekf_lock  = threading.Lock()
@@ -107,6 +109,8 @@ class SliderObserver:
         self._last_visual = None
         with self._est_lock:
             self._detection_times.clear()
+        if self._disturb is not None:
+            self._disturb.reset()
 
     def has_visual(self) -> bool:
         if self.variant == "BASELINE": return True
@@ -140,6 +144,9 @@ class SliderObserver:
         while self.running:
             t0 = time.perf_counter()
             z  = self.estimator.get_pose_estimate()
+
+            if self._disturb is not None:
+                z = self._disturb.process(z)
 
             if z is not None:
                 with self._ekf_lock:

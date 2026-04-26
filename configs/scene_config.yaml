@@ -3,7 +3,7 @@ render_fps: 30
 
 headless: False
 display:
-  enabled: True
+  enabled: False
   # Options: horizontal, vertical, grid
   layout: grid
   grid_cols: 2

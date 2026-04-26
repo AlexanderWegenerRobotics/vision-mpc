@@ -1,0 +1,8 @@
+scenario: "free"           # "free" | "keepout"
+level_name: "clean"        # used for log folder + csv suffix
+
+disturbance:
+  sigma_xy: 0.0
+  sigma_theta: 0.0
+  drop_prob: 0.0
+  latency_frames: 0

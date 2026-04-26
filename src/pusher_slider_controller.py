@@ -5,8 +5,9 @@ from scipy.spatial.transform import Rotation
 
 from src.trajectory import TrajectoryPlanner
 from src.mpc import PusherSliderModel, PusherSliderNMPC, Face, ControllerVariant
-from src.path_planner import StraightLinePlanner, choose_face, DubinsPlanner
+from src.path_planner import StraightLinePlanner, choose_face
 from src.slider_observer import SliderObserver
+from src.disturbance import DisturbanceModel
 from src.logger import EpisodeLogger
 from src.utils import (update_vel_arrow, update_slider_frame, wxyz_to_xyzw, xyzw_to_wxyz,
                        EpisodeMetrics, append_result, load_fixed_scenario, sample_scenario,
@@ -26,8 +27,8 @@ class Phase(Enum):
 class PusherSliderController:
     def __init__(self, system=None, config=None):
 
-        self.config        = load_yaml(config.get("task_config"))
-        self.study_cfg     = load_yaml(config.get("study_config"))
+        self.config        = config.get("_task_resolved")  or load_yaml(config.get("task_config"))
+        self.study_cfg     = config.get("_study_resolved") or load_yaml(config.get("study_config"))
         self.system        = system
         self.slider_name   = self.config["slider_name"]
         self.device_name   = self.config["arm_name"]
@@ -40,36 +41,53 @@ class PusherSliderController:
         self.timeout       = self.config["timeout"]
         self.variant       = ControllerVariant[self.config["mpc"]["variant"]]
 
-        self.start_xy    = np.array(self.config["scenario"]["start"]["xy"], dtype=float)
-        self.start_theta = float(self.config["scenario"]["start"]["theta"])
-        self.goal_xy     = np.array(self.config["scenario"]["goal"]["xy"], dtype=float)
-        self.goal_theta  = float(self.config["scenario"]["goal"]["theta"])
+        self._dist_cfg     = self.config.get("disturbance_config", {})
+        self._level_name   = self._dist_cfg.get("level_name", "default")
+        self._scenario     = self._dist_cfg.get("scenario", "free")
+        self._disturb_dict = self._dist_cfg.get("disturbance", {})
+        self._run_tag      = f"{self.variant.name}_{self._scenario}_{self._level_name}"
+
+        scenarios = self.study_cfg.get("scenarios", {})
+        scen      = scenarios.get(self._scenario, {})
+        self.start_xy      = np.array(scen.get("start", {}).get("xy",    [0.5, -0.1]), dtype=float)
+        self.start_theta   = float(scen.get("start", {}).get("theta", 0.0))
+        self.goal_xy       = np.array(scen.get("goal",  {}).get("xy",    [0.6,  0.1]), dtype=float)
+        self.goal_theta    = float(scen.get("goal",  {}).get("theta", 0.0))
+        self._scen_keepout = scen.get("keepout", {})
 
         self._ps_model   = PusherSliderModel(self.config)
         self._nmpc       = PusherSliderNMPC(self._ps_model, self.config)
-        self._planner    = StraightLinePlanner(v_max=self.config["planner"]["v_max"], 
-                                               a_max=self.config["planner"]["a_max"], theta_delay_frac=self.config["planner"]["theta_delay_frac"])
-    
-        #self._planner = DubinsPlanner(R_min=0.10, v_max=self.config["planner"]["v_max"], a_max=self.config["planner"]["a_max"])
+        self._planner    = StraightLinePlanner(v_max=self.config["planner"]["v_max"],
+                                               a_max=self.config["planner"]["a_max"],
+                                               theta_delay_frac=self.config["planner"]["theta_delay_frac"])
         self._trajectory = TrajectoryPlanner()
-        self._observer   = SliderObserver(self.config, self.system, self._ps_model)
-        self._logger     = EpisodeLogger(self.config)
+
+        self._dist_rng   = np.random.default_rng(0)
+        self._disturb    = DisturbanceModel(self._disturb_dict, self._dist_rng)
+        self._observer   = SliderObserver(self.config, self.system, self._ps_model, disturbance=self._disturb)
+        self._logger = EpisodeLogger(self.config, log_subdir=self._run_tag)
 
         self.phase        = Phase.ACQUIRE
         self.running      = False
         self._path_ref    = None
         self._step_idx    = 0
         self._episode_idx = 0
+        self._current_seed = 0
         self._contact_face = None
         self._last_obs_x  = None
         self._metrics     = None
         self._rng         = np.random.default_rng()
-        self._ee_yaw_vis = None
+        self._ee_yaw_vis  = None
 
     def loop(self):
         self._observer.start()
         try:
-            for _ in range(self.config.get("iterations", 1)):
+            n = self.config.get("n_seeds_override", self.config.get("iterations", 1))
+            for seed in range(n):
+                self._current_seed = seed
+                self._dist_rng     = np.random.default_rng(seed)
+                self._disturb._rng = self._dist_rng
+                self._rng          = np.random.default_rng(10000 + seed)
                 self.run()
         finally:
             self._observer.stop()
@@ -100,9 +118,16 @@ class PusherSliderController:
                 print(f"Phase {self.phase.name} after {time.time() - t0:.2f}s")
 
                 x_slider = self._observer.get_gt_state()
-                row = self._metrics.summarise(x_slider, success)
-                append_result(row, csv_path=self.config.get("results_csv", "results.csv"))
-                self._logger.save(success)
+                row = self._metrics.summarise(
+                    x_slider, success,
+                    seed=self._current_seed,
+                    level_name=self._level_name,
+                    scenario=self._scenario,
+                    disturbance=self._disturb_dict,
+                )
+                csv_path = self.config.get("results_csv", f"results_{self._run_tag}.csv")
+                append_result(row, csv_path=csv_path)
+                self._logger.save(success, seed=self._current_seed)
                 self._episode_idx += 1
 
             time.sleep(self.mpc_dt)
@@ -136,7 +161,7 @@ class PusherSliderController:
                 return Phase.APPROACH
 
             time.sleep(0.3)
-            
+
         count = self._observer.get_recent_detection_count(window_sec)
         loc   = self._observer.is_localised(n_required, window_sec, cov_thresh)
         print(f"[acquire] detections={count}/{n_required}  localised={loc}")
@@ -147,9 +172,9 @@ class PusherSliderController:
         x_slider = self._observer.get_state()
         self._contact_face = choose_face(x_slider[:2], x_slider[2], self.goal_xy)
         self._nmpc.set_face(self._contact_face)
-        keepout = self.study_cfg.get("keepout", {})
-        if keepout.get("enabled", False):
-            self._nmpc.set_state_keepout(np.array(keepout["lbx"]), np.array(keepout["ubx"]))
+        if self._scen_keepout.get("enabled", False):
+            self._nmpc.set_state_keepout(np.array(self._scen_keepout["lbx"]),
+                                         np.array(self._scen_keepout["ubx"]))
 
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
 
@@ -185,7 +210,7 @@ class PusherSliderController:
             print("[warn] vision lost during pushing")
             return Phase.ACQUIRE
         P = self._observer.get_covariance()
-        if self.variant is not ControllerVariant.BASELINE and P is not None and np.trace(P) > 1e-2:
+        if P is not None and np.trace(P) > 1e-2:
             print("[warn] EKF covariance exceeds threshold during pushing")
             return Phase.LOST
         x_slider = self._observer.get_state()
@@ -221,10 +246,12 @@ class PusherSliderController:
         pusher_tip = self._get_pusher_tip()
         update_vel_arrow(self.system, ee_pose, ee_vel_world, self.z_contact)
 
-        gt_state = self._observer.get_gt_state()
+        gt_state  = self._observer.get_gt_state()
         est_state = self._observer.get_est_state()
-        est_cov = self._observer.get_covariance()
+        est_cov   = self._observer.get_covariance()
         vis_state = self._observer.get_vision_state()
+
+        self._metrics.record_step(gt_state, ref_win[0][:2], status)
 
         self._logger.record(
             gt_state      = gt_state,
@@ -259,7 +286,7 @@ class PusherSliderController:
             return Phase.FAILED
 
         return Phase.PUSHING
-    
+
     def run_detection_loss(self) -> Phase:
         self._observer.reset()
         self._nmpc.reset()
@@ -297,7 +324,7 @@ class PusherSliderController:
         u_body = np.array([ca * u[0] - sa * u[1], sa * u[0] + ca * u[1]])
         c, s   = np.cos(theta), np.sin(theta)
         return np.array([c * u_body[0] - s * u_body[1], s * u_body[0] + c * u_body[1], 0.0])
-    
+
     def _world_vel_to_canonical(self, v_world_xy, theta, face):
         face_angle = {Face.NEG_X: 0.0, Face.POS_Y: -np.pi/2, Face.POS_X: np.pi, Face.NEG_Y: np.pi/2}[face]
         c, s = np.cos(theta), np.sin(theta)
@@ -363,30 +390,25 @@ class PusherSliderController:
         self._step_idx     = 0
         self._contact_face = None
         self._last_obs_x   = None
-        self._ee_yaw_vis = None
+        self._ee_yaw_vis   = None
         self._nmpc.reset()
         self.system.clear_trail("ee_trail")
         update_vel_arrow(self.system, Pose(position=np.zeros(3), quaternion=np.array([0, 0, 0, 1])), np.ones(3), 0.0)
 
-        keepout = self.study_cfg.get("keepout", {})
-        if keepout.get("enabled", False):
-            y_wall = keepout["ubx"][1]
+        if self._scen_keepout.get("enabled", False):
+            y_wall = self._scen_keepout["ubx"][1]
             self.system.clear_trail("wall_trail")
             for x in np.linspace(0.4, 0.7, 30):
                 self.system.set_trail("wall_trail", np.array([x, y_wall, self.z_contact]))
-
-        if self.config["scenario"].get("mode", "fixed") == "random":
-            self.start_xy, self.start_theta, self.goal_xy, self.goal_theta = \
-                sample_scenario(self.config, self._rng)
-        else:
-            self.start_xy, self.start_theta, self.goal_xy, self.goal_theta = \
-                load_fixed_scenario(self.config)
 
         self._metrics = EpisodeMetrics(
             variant=self.config["mpc"]["variant"],
             start_xy=self.start_xy, start_theta=self.start_theta,
             goal_xy=self.goal_xy,   goal_theta=self.goal_theta,
         )
+        if self._scen_keepout.get("enabled", False):
+            self._metrics.set_keepout(self._scen_keepout["lbx"][:2],
+                                      self._scen_keepout["ubx"][:2])
 
         slider_z    = self.config["surface_height_world"] + self.config["slider_half_z"]
         slider_pos  = np.array([self.start_xy[0], self.start_xy[1], slider_z])
