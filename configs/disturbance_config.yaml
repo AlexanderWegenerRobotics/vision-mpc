@@ -1,8 +1,8 @@
 scenario: "keepout"
-level_name: "noise_high"
+level_name: "clean"
 
 disturbance:
-  sigma_xy: 0.005
-  sigma_theta: 0.02
+  sigma_xy: 0.010
+  sigma_theta: 0.050
   drop_prob: 0.0
   latency_frames: 0
