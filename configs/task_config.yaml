@@ -24,7 +24,7 @@ scenario:
   workspace:
     x: [0.40, 0.60]       # Franka-reachable band away from base column
     y: [-0.20, 0.20]      # symmetric lateral range, avoids side-reach singularity
-    theta: [-0.3, 0.3]  # +-45 deg; wider is fine when symmetry=pi/2
+    theta: [-0.349066, 0.349066]  # +-20 deg
   start:
     xy: [0.5, -0.2]
     theta: 0.15
@@ -32,8 +32,8 @@ scenario:
     xy: [0.6,  0.3]
     theta: 0.0
 
-goal_pos_tol:   0.007       # 8cm
-goal_theta_tol: 0.436332    # ca. 20deg
+goal_pos_tol:   0.005       # 5cm
+goal_theta_tol: 0.349066    # ca. 20deg
 
 planner:
   v_max: 0.1    # cruise speed (m/s) for trapezoidal profile
@@ -55,7 +55,7 @@ mpc:
   slider_mass: 0.3
   nlp_solver_max_iter: 20
   ekf_Q: [1e-3, 1e-3, 1e-3]     # process noise
-  ekf_R: [1e-4, 1e-4, 3e-4]   # measurement noise
+  ekf_R: [1e-4, 1e-4, 3e-4]     # measurement noise
   cc_Q: [1e-6, 1e-6, 1e-5]
   ekf_gate_thresh: 7.81
   cc_beta: 2.5
