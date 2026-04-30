@@ -21,7 +21,7 @@ The key question studied: **does propagating EKF uncertainty into the MPC constr
 
 | GT Baseline | CE-MPC | CC-MPC β = 1.645 |
 |:-----------:|:------:|:----------------:|
-| ![GT](docs/gifs/GT_MPC.gif) | ![CE](docs/gifs/CE-MPC.gif) | ![CC](docs/gifs/CC-MPC_1-645.gif) |
+| ![GT](docs/gifs/GT-MPC.gif) | ![CE](docs/gifs/CE-MPC.gif) | ![CC](docs/gifs/CC-MPC_1-645.gif) |
 
 *All clips: keepout wall constraint active, noise_high disturbance (σ_xy = 10 mm, σ_θ = 50 mrad). Dashed blue line = keep-out wall.*
 
@@ -29,7 +29,7 @@ The key question studied: **does propagating EKF uncertainty into the MPC constr
 
 | β = 0.5 (aggressive) | β = 1.645 (nominal) | β = 2.5 (conservative) |
 |:--------------------:|:-------------------:|:----------------------:|
-| ![b05](docs/gifs/CC-MPC_0-5.gif) | ![b164](docs/gifs/CC-MPC_1-645.gif) | ![b25](docs/gifs/CC_MPC-2-5.gif) |
+| ![b05](docs/gifs/CC-MPC_0-5.gif) | ![b164](docs/gifs/CC-MPC_1-645.gif) | ![b25](docs/gifs/CC_MPC_2-5.gif) |
 
 *Higher β → more wall clearance, lower task success rate. See Fig. 7 in the report for the quantitative trade-off.*
 
