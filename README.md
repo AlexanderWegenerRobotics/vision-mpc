@@ -3,7 +3,7 @@
 Closed-loop planar pusher–slider manipulation using Nonlinear Model Predictive Control (NMPC) driven by visual pose estimation. Three controller variants — a ground-truth baseline, certainty-equivalent MPC (CE-MPC), and chance-constrained MPC (CC-MPC) — are compared under synthetic perception disturbances in MuJoCo simulation.
 
 > **ME/SE 740 Final Project — Boston University, Spring 2026**
-> Full report available in [`docs/report.pdf`](docs/report.pdf)
+> Full report available in [`docs/report.pdf`](docs/Wegener_ME740_Report.pdf)
 
 ---
 
