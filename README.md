@@ -29,7 +29,7 @@ The key question studied: **does propagating EKF uncertainty into the MPC constr
 
 | β = 0.5 (aggressive) | β = 1.645 (nominal) | β = 2.5 (conservative) |
 |:--------------------:|:-------------------:|:----------------------:|
-| ![b05](docs/gifs/CC-MPC_0-5.gif) | ![b164](docs/gifs/CC-MPC_1-645.gif) | ![b25](docs/gifs/CC_MPC_2-5.gif) |
+| ![b05](docs/gifs/CC-MPC_0-5.gif) | ![b164](docs/gifs/CC-MPC_1-645.gif) | ![b25](docs/gifs/CC-MPC_2-5.gif) |
 
 *Higher β → more wall clearance, lower task success rate. See Fig. 7 in the report for the quantitative trade-off.*
 
