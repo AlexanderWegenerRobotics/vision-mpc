@@ -1,8 +1,8 @@
 scenario: "keepout"
-level_name: "latency_high"
+level_name: "noise_high"
 
 disturbance:
-  sigma_xy: 0.000
-  sigma_theta: 0.000
+  sigma_xy: 0.005
+  sigma_theta: 0.02
   drop_prob: 0.0
-  latency_frames: 10
+  latency_frames: 0

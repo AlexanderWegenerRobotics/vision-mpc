@@ -212,9 +212,9 @@ class PusherSliderController:
             print("[warn] vision lost during pushing")
             return Phase.ACQUIRE
         P = self._observer.get_covariance()
-        if P is not None and np.trace(P) > 1e-2:
-            print("[warn] EKF covariance exceeds threshold during pushing")
-            return Phase.LOST
+        #if P is not None and np.trace(P) > 1e-2:
+        #    print("[warn] EKF covariance exceeds threshold during pushing")
+        #    return Phase.LOST
         x_slider = self._observer.get_state()
         update_slider_frame(self.system, self.config, x_slider)
         self.ee_quat_ref = self._compute_visibility_quat(x_slider, self._contact_face)
@@ -400,8 +400,8 @@ class PusherSliderController:
         if self._scen_keepout.get("enabled", False):
             y_wall = self._scen_keepout["ubx"][1]
             self.system.clear_trail("wall_trail")
-            for x in np.linspace(0.4, 0.7, 30):
-                self.system.set_trail("wall_trail", np.array([x, y_wall, self.z_contact]))
+            #for x in np.linspace(0.4, 0.7, 30):
+            #    self.system.set_trail("wall_trail", np.array([x, y_wall, self.z_contact]))
 
         self._metrics = EpisodeMetrics(
             variant=self.config["mpc"]["variant"],

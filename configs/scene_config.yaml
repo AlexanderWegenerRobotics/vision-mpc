@@ -91,9 +91,12 @@ objects:
 cameras:
   - name: workspace_overview
     type: fixed
-    pos: [0.5, 0.5, 1.2]
-    look_at: [0.5, 0.0, 0.8]
+    pos: [0.35, 0.5, 1.2]
+    look_at: [0.3, 0.0, 0.8]
     fovy: 90
+    #pos: [0.85, 0.25, 0.7]
+    #look_at: [0.4, 0.2, 0.55]
+    #fovy: 90
 
 visualizations:
   trails:
